@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuzQ2W3r1zb0tlZDwmPVB5XSJjhSgEwkm0+QMwPuaNAt2H7j5/gKBkhdj6r4wCSGkjiJZ1DXYvz4H6prH8+NPRrSNmtLxvVHg133UVBiwqsRbR7igSFz8GUlDm5DYFapbePNjeKTOc5YKhwXA2CGAc1HkM41qOPKWmzzcGH4YTkoBIpPtGJIzV74CRP1uBL7Hfjis3WNsW/Eto0AwVYNZLdRikyD766kLgVyre5SqNUhfNPv1iNfUJw39vpsOVE+t2djwTaUEvLv5LKe2XB9cd86wMEm9a7iEmiIys0iZpejya5AvB8IE5jiK7s1gd7UoOBJVRZS1XbTRwX5mnTh+PQIDAQAB",
+  "name": "WorkWithPriends for WellSky",
+  "version": "0.1.0",
+  "description": "A dashboard docked inside WellSky: IRF weekly therapy minutes and Section GG documentation review.",
+  "permissions": ["cookies", "storage", "nativeMessaging"],
+  "host_permissions": ["https://*.specialtycare.wellsky.com/*"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Show or hide the WorkWithPriends dashboard" },
+  "content_scripts": [
+    {
+      "matches": ["https://*.specialtycare.wellsky.com/*"],
+      "js": ["page-bridge.js", "modules/gg/engine.js", "modules/gg/navigator.js", "modules/gg/bridge.js"],
+      "run_at": "document_idle",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://*.specialtycare.wellsky.com/*"],
+      "js": ["dashboard.js", "modules/minutes.js", "modules/gg/tab.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["panel.css"],
+      "matches": ["https://*.specialtycare.wellsky.com/*"]
+    }
+  ]
+}
