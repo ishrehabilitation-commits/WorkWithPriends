@@ -1,0 +1,5 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Keep Windows line endings in the setup file, even in a raw download.
+setup/WWP-Setup.cmd -text
