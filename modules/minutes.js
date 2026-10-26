@@ -12,6 +12,8 @@
   const WEEKLY_TARGET_MIN = 900; // 15 hours per 7-day period from admission
   const CHARGE_CONCURRENCY = 4; // parallel charge requests; keep it gentle
   const DAY_MS = 86_400_000;
+  const DEFAULT_DISCH_DAYS = 15; // how far back "include discharged" looks
+  const MAX_DISCH_DAYS = 90;
   const MINUTE_FIELDS = [
     ["CHRGINDV", "Individual"],
     ["CHRGGRP", "Group"],
@@ -85,7 +87,15 @@
     return "Unknown";
   };
 
-  const maxWeek = (admit) => Math.max(0, Math.floor((todayUtc() - admit) / DAY_MS / 7));
+  // The last admission week: the one holding today, or the discharge date.
+  const maxWeek = (admit, end = todayUtc()) => Math.max(0, Math.floor((end - admit) / DAY_MS / 7));
+
+  // WellSky fills GRIDDISCHG (YYYYMMDD) once a patient is discharged. Ignore a
+  // date that hasn't happened yet, so a planned discharge isn't treated as one.
+  const dischargeDate = (pat) => {
+    const t = parseYmd(pat.GRIDDISCHG);
+    return t != null && t <= todayUtc() ? t : null;
+  };
 
   const dayIndex = (admit, chargeYmd, week) => {
     const t = parseYmd(chargeYmd);
@@ -124,6 +134,7 @@
   // finished, so the minutes still needed work out to more than target/7 a day.
   function standing(p) {
     if (p.admit == null) return { status: "unknown" };
+    if (p.disch != null) return { status: "discharged", total: minutesInWeek(p.charges, p.admit, p.maxWk) };
     const start = p.admit + p.maxWk * 7 * DAY_MS;
     const total = minutesInWeek(p.charges, p.admit, p.maxWk);
     const daysDone = Math.max(0, Math.min(6, Math.round((todayUtc() - start) / DAY_MS)));
@@ -134,15 +145,15 @@
     return { status, total, remaining, daysLeft, perDay };
   }
 
-  // "need": most minutes per remaining day first, met targets after them, and
-  // anyone we couldn't check at the end. "room" and "name" are plain lists;
+  // "need": most minutes per remaining day first, met targets after them,
+  // then discharged patients, and anyone we couldn't check at the end. "room" and "name" are plain lists;
   // rooms compare as numbers (so 99 comes before 120) and blank rooms go last.
   const SORTS = [
     ["need", "Most minutes needed"],
     ["room", "Room"],
     ["name", "Name"],
   ];
-  const STATUS_ORDER = { behind: 0, onpace: 0, met: 1, unknown: 2 };
+  const STATUS_ORDER = { behind: 0, onpace: 0, met: 1, discharged: 2, unknown: 3 };
   const collator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
   const byName = (a, b) => collator.compare(String(a.pat.GRIDNAME ?? ""), String(b.pat.GRIDNAME ?? ""));
   const byRoom = (a, b) => {
@@ -151,7 +162,7 @@
     return (!ra - !rb) || collator.compare(ra, rb);
   };
   function sortPatients(patients, by) {
-    const rank = (p) => STATUS_ORDER[p.standing.status] + (p.error ? 2 : 0);
+    const rank = (p) => STATUS_ORDER[p.standing.status] + (p.error ? 3 : 0);
     const byNeed = (a, b) => rank(a) - rank(b) || (b.standing.perDay ?? 0) - (a.standing.perDay ?? 0);
     const cmp = by === "room" ? byRoom : by === "name" ? byName : byNeed;
     return patients.sort((a, b) => cmp(a, b) || byName(a, b) || byRoom(a, b));
@@ -204,21 +215,23 @@
     }
   }
 
-  async function fetchPatients(userId, token, facility) {
+  // dischDays > 0 also returns patients discharged in the last that many days.
+  async function fetchPatients(userId, token, facility, dischDays = 0) {
     const json = await callWellsky("HOHSRCH", {
       USERID: userId, PASSWD: token, REQSEARCHTYPE: "C", REQLVL6: facility, REQUSER: userId,
       REQALERT: "", REQSEVR: "", REQCLASS: "", REQVIEW: "H", REQSEARCHBY: "A", REQNSTN: "",
-      REQMEDCART: "", REQNAME: "", REQACCT: "", REQMRNO: "", REQDISCH: "N", REQDISCHDAY: "",
+      REQMEDCART: "", REQNAME: "", REQACCT: "", REQMRNO: "",
+      REQDISCH: dischDays > 0 ? "Y" : "N", REQDISCHDAY: dischDays > 0 ? dischDays : "",
       REQACTIVE: "Y", REQPREADMIT: "N", REQINHOUSE: "Y", REQOUTPATIENT: "N", REQPHYTYPE: "A",
       INCLUDEPHOTO: "N",
     });
     return (json.GRIDDATA ?? []).filter((p) => p.GRIDCAT1 === "Inpatient Rehab");
   }
 
-  async function fetchCharges(userId, token, facility, acct, admitYmd) {
+  async function fetchCharges(userId, token, facility, acct, admitYmd, toYmd) {
     const json = await callWellsky("HOHCCHG", {
       USERID: userId, PASSWD: token, REQLV6: facility, REQACC: int(acct), REQDLT: "N",
-      REQFDT: admitYmd, REQTDT: todayYmd(), REQIDX: "", REQPRC: "", REQPHY: "",
+      REQFDT: admitYmd, REQTDT: toYmd, REQIDX: "", REQPRC: "", REQPHY: "",
     });
     return (json.RECLIST ?? []).filter((c) => discipline(c.CHRGDESC));
   }
@@ -236,6 +249,8 @@
         <label class="sortby">Sort patients by <select name="sortBy">
           ${SORTS.map(([id, label]) => `<option value="${id}">${label}</option>`).join("")}
         </select></label>
+        <label class="disch"><span><input type="checkbox" name="inclDisch"> Include patients discharged in the last</span>
+          <span><input type="number" name="dischDays" min="1" max="${MAX_DISCH_DAYS}" value="${DEFAULT_DISCH_DAYS}"> days</span></label>
       </form>
       <p class="status" role="status"></p>
       <div class="tabs" role="tablist">
@@ -255,7 +270,7 @@
     const minutesView = $('[data-view="minutes"]');
     const correctionsView = $('[data-view="corrections"]');
 
-    const state = { patients: [], busy: false, settingsLoaded: false, onlyNeeding: false, sortBy: "need" };
+    const state = { patients: [], busy: false, settingsLoaded: false, onlyNeeding: false, sortBy: "need", dischDays: 0 };
 
     function setStatus(text, isError = false) {
       const el = $(".status");
@@ -265,10 +280,21 @@
 
     async function loadSettings() {
       if (state.settingsLoaded) return;
-      const { sortBy } = await chrome.storage.sync.get(["sortBy"]);
+      const { sortBy, inclDisch, dischDays } = await chrome.storage.sync.get(["sortBy", "inclDisch", "dischDays"]);
       if (SORTS.some(([id]) => id === sortBy)) state.sortBy = sortBy;
       form.sortBy.value = state.sortBy;
+      form.inclDisch.checked = !!inclDisch;
+      if (dischDays) form.dischDays.value = dischDays;
+      form.dischDays.disabled = !form.inclDisch.checked;
       state.settingsLoaded = true;
+    }
+
+    // 0 when discharged patients are left out.
+    function dischDaysWanted() {
+      if (!form.inclDisch.checked) return 0;
+      const days = Math.max(1, Math.min(MAX_DISCH_DAYS, int(form.dischDays.value) || DEFAULT_DISCH_DAYS));
+      form.dischDays.value = days;
+      return days;
     }
 
     // ------------------------------------------------------------------ //
@@ -281,7 +307,7 @@
     };
 
     function renderPatient(p, idx) {
-      const { pat, charges, admit, week, maxWk, error, open } = p;
+      const { pat, charges, admit, disch, week, maxWk, error, open } = p;
       const needsMinutes = p.standing.status === "behind" || p.standing.status === "onpace";
       const name = esc(pat.GRIDNAME);
       const room = esc(roomNumber(pat.GRIDROOM));
@@ -328,6 +354,10 @@
       if (met) {
         meterClass = "met";
         meterNote = "target met";
+      } else if (isCurrent && disch != null) {
+        // The stay ended partway through this week, so it was never a full week.
+        meterClass = "short";
+        meterNote = `discharged ${fmtWeekday(disch)} ${fmtMd(disch)}, ${WEEKLY_TARGET_MIN - weekTotal} short of a full week`;
       } else if (isCurrent) {
         const { remaining, daysLeft, perDay, status } = p.standing;
         meterClass = status === "behind" ? "behind" : "pending";
@@ -356,10 +386,11 @@
           <div>
             <h2>${name}</h2>
             <span class="meta">Room ${room}</span><span class="meta">Admitted ${fmtMdy(admit)}</span>
+            ${disch != null ? `<span class="meta discharged">Discharged ${fmtMdy(disch)}</span>` : ""}
           </div>
           <div class="weeknav">
             <button type="button" data-act="week" data-p="${idx}" data-dir="-1" ${week === 0 ? "disabled" : ""} aria-label="Previous week">&lsaquo;</button>
-            <span>Admission week ${week + 1}<small>${fmtMd(days[0])} – ${fmtMd(days[6])}${isCurrent ? ", this week" : ""}</small></span>
+            <span>Admission week ${week + 1}<small>${fmtMd(days[0])} – ${fmtMd(days[6])}${isCurrent ? (disch != null ? ", discharge week" : ", this week") : ""}</small></span>
             <button type="button" data-act="week" data-p="${idx}" data-dir="1" ${isCurrent ? "disabled" : ""} aria-label="Next week">&rsaquo;</button>
           </div>
         </header>
@@ -376,17 +407,18 @@
     }
 
     function renderSummary() {
-      const counts = { behind: 0, onpace: 0, met: 0, unknown: 0 };
+      const counts = { behind: 0, onpace: 0, met: 0, discharged: 0, unknown: 0 };
       for (const p of state.patients) counts[p.error ? "unknown" : p.standing.status]++;
-      const n = state.patients.length;
+      const n = state.patients.filter((p) => p.disch == null).length;
       const part = (cls, num, label) => (num ? `<li class="${cls}"><strong>${num}</strong> ${label}</li>` : "");
       return `<div class="summary">
-        <p class="headline">This week, <strong>${counts.behind + counts.onpace}</strong> of ${n} patient${n === 1 ? "" : "s"}
+        <p class="headline">This week, <strong>${counts.behind + counts.onpace}</strong> of ${n} in-house patient${n === 1 ? "" : "s"}
           still need${counts.behind + counts.onpace === 1 ? "s" : ""} minutes.</p>
         <ul class="tally">
           ${part("behind", counts.behind, "behind pace")}
           ${part("pending", counts.onpace, "on pace")}
           ${part("met", counts.met, "met the target")}
+          ${part("discharged", counts.discharged, `discharged in the last ${state.dischDays} days`)}
           ${part("unknown", counts.unknown, "couldn't be checked")}
         </ul>
         <label class="filter"><input type="checkbox" data-act="filter" ${state.onlyNeeding ? "checked" : ""}>
@@ -399,6 +431,8 @@
           <p><strong>Behind pace</strong> means fewer minutes than an even share of the target for the days already
             finished this week (about ${Math.round(WEEKLY_TARGET_MIN / 7)} a day). Sorting by "Most minutes needed" puts
             the patients who need the most minutes per remaining day first.</p>
+          <p><strong>Discharged</strong> patients (when included) are listed after everyone in house. Their weeks stop
+            at the discharge date, and the discharge week is usually a partial one.</p>
         </details>
       </div>`;
     }
@@ -407,7 +441,7 @@
       minutesView.classList.toggle("only-needing", state.onlyNeeding);
       minutesView.innerHTML = state.patients.length
         ? renderSummary() + state.patients.map(renderPatient).join("")
-        : `<p class="empty">No Inpatient Rehab patients are in house for this facility.</p>`;
+        : `<p class="empty">No Inpatient Rehab patients are in house${state.dischDays ? ` or discharged in the last ${state.dischDays} days` : ""} for this facility.</p>`;
     }
 
     function rerenderPatient(idx) {
@@ -470,6 +504,8 @@
     async function load() {
       if (state.busy) return;
       const facility = ctx.facility();
+      const dischDays = dischDaysWanted();
+      chrome.storage.sync.set({ inclDisch: dischDays > 0, dischDays: int(form.dischDays.value) });
 
       state.busy = true;
       loadBtn.disabled = true;
@@ -479,33 +515,38 @@
         const userId = await getUserId();
 
         setStatus("Loading patient list…");
-        const pats = await fetchPatients(userId, token, int(facility));
+        const pats = await fetchPatients(userId, token, int(facility), dischDays);
 
         let done = 0;
         state.patients = await mapLimit(pats, CHARGE_CONCURRENCY, async (pat) => {
           let charges = [];
           let error = null;
+          const disch = dischargeDate(pat);
           try {
-            charges = await fetchCharges(userId, token, int(facility), pat.GRIDACCT, pat.GRIDADMIT);
+            const toYmd = disch != null ? String(pat.GRIDDISCHG) : todayYmd();
+            charges = await fetchCharges(userId, token, int(facility), pat.GRIDACCT, pat.GRIDADMIT, toYmd);
           } catch (err) {
             error = err.message;
           }
           setStatus(`Loading charges for patient ${++done} of ${pats.length}…`);
           const admit = parseYmd(pat.GRIDADMIT);
-          const maxWk = admit == null ? 0 : maxWeek(admit);
+          const maxWk = admit == null ? 0 : maxWeek(admit, disch ?? todayUtc());
           // Start on the most recent week, like the desktop version did.
-          const p = { pat, charges, error, admit, maxWk, week: maxWk, open: new Set() };
+          const p = { pat, charges, error, admit, disch, maxWk, week: maxWk, open: new Set() };
           p.standing = standing(p);
           return p;
         });
         sortPatients(state.patients, state.sortBy);
+        state.dischDays = dischDays;
 
         renderMinutes();
         renderCorrections();
         const failed = state.patients.filter((p) => p.error).length;
         const time = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
         setStatus(
-          `Loaded ${state.patients.length} patient${state.patients.length === 1 ? "" : "s"} at ${time} as ${userId}.` +
+          `Loaded ${state.patients.length} patient${state.patients.length === 1 ? "" : "s"}` +
+            (dischDays ? ` (${state.patients.filter((p) => p.disch != null).length} discharged)` : "") +
+            ` at ${time} as ${userId}.` +
             (failed ? ` Charges failed for ${failed}; see the notes below.` : ""),
           failed > 0,
         );
@@ -535,6 +576,12 @@
     });
 
     // The loaded list belongs to the old facility; say so rather than mixing them.
+    form.inclDisch.addEventListener("change", () => {
+      form.dischDays.disabled = !form.inclDisch.checked;
+      if (form.inclDisch.checked) form.dischDays.focus();
+      if (state.patients.length) setStatus("Load patients again to apply the discharged setting.");
+    });
+
     ctx.onFacilityChange(() => {
       if (!state.patients.length) return;
       setStatus("Facility changed. Load patients again to see its patients.");
