@@ -40,9 +40,15 @@ you are already signed in with.
 ## Install
 
 **Windows:** double-click `setup\WWP-Setup.cmd`. It installs Git if needed,
-downloads this repository, sets up the **Update now** button and opens the
-browser ready to add the extension. The file works on its own, so you can send
-it to a coworker or put it on a network share.
+downloads this repository and sets up the **Update now** button. Then it opens
+`chrome://extensions` or `edge://extensions` with a small guide window beside
+it: turn on Developer mode, click **Load unpacked** and paste the folder
+(already copied, so Ctrl+V), check the extension is on, and pin it. The guide
+ticks each step off by reading the browser's settings files, since browsers
+don't let anything highlight or click on their extensions page. Edge doesn't
+save pins where setup can read them, so tick that step yourself there. When
+you close the guide it opens WellSky. The file works on its own, so you can
+send it to a coworker or put it on a network share.
 
 **By hand:** clone this repository, open `chrome://extensions`, turn on
 Developer mode, click **Load unpacked** and pick the folder. Then run the
@@ -57,6 +63,8 @@ the helper in `updater/` and reloads the extension. To ship an update, bump
 
 ## Files
 
+- `icons/`: the toolbar and extensions-page icon (a navy clipboard with a
+  green check).
 - `dashboard.js`: the panel, header, update banner and tab bar. Modules add
   their tab with `WWP.addTab({ id, label, init })`.
 - `modules/minutes.js`: the IRF minutes tab.
