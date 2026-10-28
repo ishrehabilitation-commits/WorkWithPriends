@@ -1,6 +1,10 @@
 // Service worker: reads the WellSky session cookies (works even if they're
 // HttpOnly, which page scripts can't see), checks GitHub for a newer version,
-// and toggles the dashboard.
+// toggles the dashboard, and runs the LTRAX sync (modules/ltrax/sync.js).
+
+import { registerLtraxSync } from "./modules/ltrax/sync.js";
+
+registerLtraxSync();
 
 const COOKIE_NAMES = ["JSESSIONTOKEN", "ssoId"];
 

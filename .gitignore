@@ -1,3 +1,7 @@
 # WorkWithPriends updater log and native host manifest (per computer)
 updater/*.log
 updater/com.wwp.dashboard.updater.json
+
+# LTRAX sync test dependencies
+node_modules/
+package-lock.json
