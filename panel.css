@@ -216,3 +216,48 @@ td.tot { font-weight: 600; border-left: 1px solid var(--line); }
   border: 1px solid var(--chrome); color: var(--chrome); background: #fff; border-radius: 3px; padding: 2px 9px; font-size: 12px;
 }
 .acts button:hover { background: var(--chrome); color: #fff; }
+
+/* Census tab (modules/census/tab.js) */
+.census .cz-types { display: flex; gap: 10px; align-self: center; }
+.census .cz-types label { display: flex; align-items: center; gap: 4px; color: var(--ink); }
+.census .cz-types input { width: auto; margin: 0; }
+.census input[name="dcDays"] { width: 4.5em; }
+.census input[name="search"] { width: 14em; }
+.census .cz-exports { padding-top: 0; border-bottom: 1px solid var(--line); }
+.census .cz-stats { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 0; }
+.census .cz-stat { display: grid; min-width: 72px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 6px; }
+.census .cz-stat b { font-size: 17px; }
+.census .cz-stat span { font-size: 11px; color: var(--muted); }
+.census table { font-size: 12px; }
+.census thead th { text-align: left; white-space: nowrap; }
+.census th[data-key] { cursor: pointer; }
+.census th[data-sorted="asc"]::after { content: " ▲"; }
+.census th[data-sorted="desc"]::after { content: " ▼"; }
+.census td { width: auto; text-align: left; vertical-align: top; padding: 5px 6px; }
+.census .c { text-align: center; }
+.census .cz-room { font-family: ui-monospace, Consolas, monospace; white-space: nowrap; }
+.census .cz-name { font-weight: 600; white-space: nowrap; }
+.census .cz-sub, .census .cz-muted { color: var(--muted); }
+.census .cz-sub { font-size: 11px; white-space: nowrap; }
+.census .cz-empty { padding: 16px; text-align: center; color: var(--muted); }
+.census .cz-type { padding: 1px 6px; border-radius: 10px; background: var(--muted); color: #fff; font-size: 11px; font-weight: 600; white-space: nowrap; }
+.census .t-LTCH .cz-type { background: #2563eb; }
+.census .t-Rehab .cz-type { background: #0d9488; }
+.census .t-BHS .cz-type { background: #9333ea; }
+.census .cz-disc { min-width: 96px; }
+.census .cz-disc.alert { background: var(--flag); }
+.census .cz-ord { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.census .cz-ord.ended { text-decoration: line-through; }
+.census .cz-tags { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 2px; }
+.census .cz-tag { padding: 0 5px; border-radius: 4px; background: #eef0f4; color: var(--muted); font-size: 10px; white-space: nowrap; }
+.census .cz-tag.on { background: #e7f6ec; color: var(--met); font-weight: 600; }
+.census .cz-tag.off { background: #fdf3e2; color: var(--behind); }
+.census .cz-tag.fmp { background: #f1eafe; color: #7c3aed; font-weight: 600; }
+.census .cz-tag.need { background: var(--flag); color: var(--short); font-weight: 700; }
+.census .cz-yn { font-size: 11px; font-weight: 600; }
+.census .cz-yn.yes { color: var(--met); }
+.census .cz-yn.no { color: #b3b8c3; font-weight: 400; }
+.census .cz-yn.unk { color: var(--behind); }
+.census .cz-team { font-size: 14px; font-weight: 700; }
+.census tr.expired td { background: var(--flag); }
+.census .cz-dctitle { margin: 16px 0 4px; font-size: 13px; }

@@ -3,3 +3,6 @@
 
 # Keep Windows line endings in the setup file, even in a raw download.
 setup/WWP-Setup.cmd -text
+
+# Excel's VBA import needs Windows line endings.
+*.bas -text
