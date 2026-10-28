@@ -15,8 +15,18 @@ picker in the header applies to every tab.
   performed, improvements). Double-click a flag to open the note at that
   question; the callout can change the score and save the note after you
   confirm. Ported from irf-gg-extension v0.2.
+- **LTRAX sync**: fills the LTRAX **Funct** tab from WellSky. **Find patients**
+  reads the LTRAX launch screen (open LTRAX in another tab, signed in, on the
+  launch screen), keeps Admission and Discharge rows with a blank status at the
+  header's facility, and matches each one to the WellSky patient grid on name
+  plus admit date. It then pulls their PT/OT forms and works out the GG codes.
+  Nothing in LTRAX changes until you click **Fill selected in LTRAX**, which
+  opens each patient in turn, fills only blank Funct fields (tick **Overwrite**
+  to replace values that differ), saves with **Next: Pain/Falls**, checks the
+  tab turned green and clicks **HOME** to release the lock. Ported from
+  SectionGGCompliance.
 
-Nothing is stored outside the browser. Both tabs call WellSky with the session
+Nothing is stored outside the browser. All tabs call WellSky with the session
 you are already signed in with.
 
 ## Install
@@ -47,7 +57,14 @@ the helper in `updater/` and reloads the extension. To ship an update, bump
   navigation. They run in the page's own world because they use WellSky's
   `Ext`/`HCS` objects; `modules/gg/bridge.js` passes messages between them and
   the tab.
-- `background.js`: session cookies, the update check and the toolbar button.
+- `modules/ltrax/`: the LTRAX sync tab. `tab.js` is the tab; `sync.js` runs in
+  the service worker and drives the LTRAX tab; `wellsky.js` holds the WellSky
+  form request and GG merge rules, `grid.js` the patient grid and name + admit
+  date matching, `ltrax-template.js` the LTRAX Funct field names.
+  Tests: `cd modules/ltrax && npm install && npm test` (made-up
+  data only).
+- `background.js`: session cookies, the update check, the toolbar button and
+  the LTRAX sync.
 - `page-bridge.js`: reads the signed-in WellSky user ID for the minutes tab.
 
 To add a tab, write `modules/<name>.js` that calls `WWP.addTab`, and list it in
