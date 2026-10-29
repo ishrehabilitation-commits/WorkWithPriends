@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuzQ2W3r1zb0tlZDwmPVB5XSJjhSgEwkm0+QMwPuaNAt2H7j5/gKBkhdj6r4wCSGkjiJZ1DXYvz4H6prH8+NPRrSNmtLxvVHg133UVBiwqsRbR7igSFz8GUlDm5DYFapbePNjeKTOc5YKhwXA2CGAc1HkM41qOPKWmzzcGH4YTkoBIpPtGJIzV74CRP1uBL7Hfjis3WNsW/Eto0AwVYNZLdRikyD766kLgVyre5SqNUhfNPv1iNfUJw39vpsOVE+t2djwTaUEvLv5LKe2XB9cd86wMEm9a7iEmiIys0iZpejya5AvB8IE5jiK7s1gd7UoOBJVRZS1XbTRwX5mnTh+PQIDAQAB",
   "name": "WorkWithPriends for WellSky",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "A dashboard docked inside WellSky: IRF weekly therapy minutes, Section GG documentation review, LTRAX GG sync and the rehab census.",
   "icons": { "16": "icons/icon16.png", "32": "icons/icon32.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
   "permissions": ["cookies", "storage", "nativeMessaging", "scripting"],

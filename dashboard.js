@@ -33,7 +33,8 @@
     <aside class="panel" aria-label="WorkWithPriends dashboard">
       <header class="bar">
         <h1>WorkWithPriends
-          <span class="version">v${esc(chrome.runtime.getManifest().version)}<span class="vstate"></span></span></h1>
+          <span class="version">v${esc(chrome.runtime.getManifest().version)}<span class="vstate"></span>
+          <button type="button" class="checknow" data-act="checknow" title="Check GitHub for a newer version now">Check now</button></span></h1>
         <label class="facility">Facility <select name="facility">
           ${FACILITIES.map(([id, label]) => `<option value="${id}">${label} (${id})</option>`).join("")}
         </select></label>
@@ -149,19 +150,21 @@
   // ------------------------------------------------------------------ //
 
   let updateChecked = false;
-  async function checkForUpdate() {
-    if (updateChecked) return;
+  // On open this uses the background's 6-hour cache; Check now (force) asks GitHub right away.
+  async function checkForUpdate(force) {
+    if (updateChecked && !force) return;
     updateChecked = true;
-    const update = await chrome.runtime.sendMessage({ type: "wwp:checkUpdate" }).catch(() => null);
     const vstate = $(".vstate");
+    if (force) vstate.textContent = " · checking…";
+    const update = await chrome.runtime.sendMessage({ type: "wwp:checkUpdate", force }).catch(() => null);
     if (!update?.latest) {
       vstate.textContent = " · couldn't check for updates";
       return;
     }
     vstate.textContent = update.outdated ? " · update available" : " · up to date";
     vstate.classList.toggle("outdated", update.outdated);
-    if (!update.outdated) return;
     const el = $(".update");
+    if (!update.outdated) { el.hidden = true; return; }
     el.innerHTML = `<p><strong>Update available:</strong> version ${esc(update.latest)} is out (you have ${esc(update.current)}).</p>
       <p class="updateact">
         <button type="button" class="primary" data-act="update">Update now</button>
@@ -212,6 +215,7 @@
       if (btn.dataset.act === "close") togglePanel(false);
       if (btn.dataset.act === "extensions") chrome.runtime.sendMessage({ type: "wwp:openExtensions" });
       if (btn.dataset.act === "update") applyUpdate(btn);
+      if (btn.dataset.act === "checknow") checkForUpdate(true);
     });
   }
 
