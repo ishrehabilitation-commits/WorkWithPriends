@@ -267,7 +267,8 @@
         row.fmpPT = pf.fmp; row.fmpOT = of.fmp;
         row.mobility = pf.oob === 'Yes' || of.oob === 'Yes' ? 'Yes' : 'No';
         row.group = pf.group === 'Yes' || of.group === 'Yes' ? 'Yes' : 'No';
-        row.team = pf.raw.team || of.raw.team || 1;
+        // FMP patients are Team 3; otherwise only what the eval form states (null = not stated).
+        row.team = pf.raw.fmp === 'Yes' || of.raw.fmp === 'Yes' ? 3 : pf.raw.team || of.raw.team || null;
         row.fmpRaw = { PT: pf.raw, OT: of.raw };
         return row;
       })
@@ -348,7 +349,7 @@
       if (x.caseload === 'Yes') return 'Y';
       if (x.evalDate && x.caseload === 'No') return `No\n${d}`;
       if (x.evalDate) return '';                       // pickup unknown
-      if (x.order && x.order.active) return 'NEW';
+      if (x.order && x.order.active) return 'Y';      // new eval ordered
       return x.ordered === '?' ? '' : 'N';
     };
     const fmp = d => {
@@ -356,12 +357,11 @@
       const v = r.fmpRaw?.[d]?.fmp;
       return v === 'Yes' ? 'Y' : v === 'No' ? 'N' : '';
     };
-    const raws = [r.fmpRaw?.PT, r.fmpRaw?.OT].filter(Boolean);
-    const groups = raws.map(x => x.group).filter(Boolean);
-    const group = groups.length ? (groups.includes('Yes') ? 'Y' : 'N') : '{IFBLANK}N';
-    const teamStated = raws.map(x => x.team).find(Boolean);
-    const onFmp = raws.some(x => x.fmp === 'Yes');
-    const team = teamStated ? String(teamStated) : onFmp ? '3' : '{IFBLANK}1';
+    // Group and Team are only written when the eval form says so (FMP means Team 3);
+    // otherwise the cell is left as it is.
+    const groups = [r.fmpRaw?.PT, r.fmpRaw?.OT].filter(Boolean).map(x => x.group).filter(Boolean);
+    const group = groups.length ? (groups.includes('Yes') ? 'Y' : 'N') : '';
+    const team = r.team ? String(r.team) : '';
     const evals = ['PT', 'OT', 'ST'].map(d => r[d].evalDate).filter(Boolean).map(Number);
     const docs = [...new Set([docLast(r.physician), docLast(r.coPhysician)].filter(Boolean))];
     return {

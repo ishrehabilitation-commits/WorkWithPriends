@@ -57,11 +57,30 @@ test('schedule export: room, name, columns and macro markers', () => {
   assert.equal(row.C, 'Smith\nJones');
   assert.deepEqual([row.F, row.G, row.H], ['No\nOT', 'Y', 'N']);
   assert.equal(row.K, '{CLEAR}');
-  assert.equal(row.I, '{IFBLANK}N');
-  assert.equal(row.M, '{IFBLANK}1');
+  assert.equal(row.I, '');
+  assert.equal(row.M, '');
   assert.equal(row.N, '{LINE1}10/20/26');
   assert.equal(row.P, '10/21');
   const tsv = WS.scheduleTsv(patients, '204', now).split('\r\n');
   assert.match(tsv[0], /^#WELLSKY-SCHEDULE\tv1\t204\t/);
   assert.equal(tsv[2].split('\t')[3], 'No\\nOT');
+});
+
+test('schedule export: new eval is Y; team and group only when the form says so', () => {
+  const base = { discharges: [], evals: { PT: [], OT: [], ST: [] }, noPickup: { PT: [], OT: [], ST: [] } };
+  const { patients } = WS.mergeData({
+    ...base,
+    current: [patient('1', 'SAMP00110A', 'LTCH'), patient('2', 'SAMP00111A', 'LTCH'), patient('3', 'SAMP00112A', 'LTCH')],
+    fmp: {
+      PT: [{ ACC: '1', FORMDATE: '20261021', RESPTEXT: 'FMP: Yes / Out of Bed: No / Group: Yes' },
+        { ACC: '2', FORMDATE: '20261021', RESPTEXT: 'FMP: No / Team: 2' }],
+      OT: [],
+    },
+    orders: [{ ACCOUNTNUM: '3', ORDERDESC: 'PT Eval and Treat', ORDERDATETIME: '202610250800' }],
+  }, now);
+  const [fmp, stated, none] = patients.map(WS.scheduleRow);
+  assert.deepEqual([fmp.M, fmp.I], ['3', 'Y']);
+  assert.deepEqual([stated.M, stated.I], ['2', '']);
+  assert.deepEqual([none.M, none.I, none.G], ['', '', 'Y']);
+  assert.equal(patients[2].team, null);
 });
