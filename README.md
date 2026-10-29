@@ -84,8 +84,12 @@ the helper in `updater/` and reloads the extension. To ship an update, bump
   `excel/WellSky_Import_.bas` is the `UpdateFromWellSky` macro: import it once
   into the schedule .xlsm (Alt+F11, File > Import File), then after **Copy for
   Schedule** run it with Alt+F8. It writes only columns A, C, F-K, M, N and P on
-  1st Med, 2nd Med and AMU-Psych, matched by room in column B, and asks before
-  clearing rooms whose patient changed. Tests: `node --test modules/census/test/*.test.js`
+  1st Med, 2nd Med and AMU-Psych, matched by room in column B. When a room has a
+  new patient it clears the old one's row first; at the end it clears A and C:P
+  (keeping B and formulas) for rooms nobody on the WellSky census is in. Team is
+  written only for FMP patients (3) or when the PT/OT eval states it, and Group
+  only when stated; otherwise those cells are left alone. A new eval order shows
+  as Y. Tests: `node --test modules/census/test/*.test.js`
   (made-up data only).
 - `background.js`: session cookies, the update check, the toolbar button and
   the LTRAX sync.

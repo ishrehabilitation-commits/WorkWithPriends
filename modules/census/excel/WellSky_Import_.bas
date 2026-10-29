@@ -7,6 +7,8 @@ Option Explicit
 '
 ' Only these columns are written:  A  C  F  G  H  I  J  K  M  N  P
 ' Cell formatting is never changed. Rooms are matched on column B.
+' At the end, rows whose room has nobody on the WellSky census (discharged,
+' or added by mistake) are cleared in A and C:P. Column B and formulas stay.
 '**************************************************************************
 
 Private Const TAG As String = "#WELLSKY-SCHEDULE"
@@ -21,8 +23,8 @@ Public Sub UpdateFromWellSky()
     Dim wasProtected(0 To 2) As Boolean
     Dim key As String, curName As String
     Dim noRoom As String, notOnSheet As String, changedList As String, vacatedList As String
-    Dim toClear As Collection, item As Variant
-    Dim updated As Long, cleared As Long, answer As VbMsgBoxResult
+    Dim toReplace As Collection, toVacate As Collection, item As Variant
+    Dim updated As Long, cleared As Long, filled As Long
 
     '--- 1. Get the export (clipboard first, then ask for the file) ---
     txt = ClipboardText()
@@ -62,36 +64,44 @@ Public Sub UpdateFromWellSky()
 
     tgt = Array(shPatientRooms, sh2ndMed, shAMUPsych)
 
-    '--- 3. First pass: find rooms with a different patient, or no patient any more ---
-    Set toClear = New Collection
+    '--- 3. First pass: rooms with a different patient now, and rooms nobody is in any more ---
+    Set toReplace = New Collection
+    Set toVacate = New Collection
     For s = 0 To UBound(tgt)
         Set ws = tgt(s)
         For r = 3 To MAX_ROW
             If UCase$(Trim$(ws.Cells(r, "B").Value & "")) = "RM#" Then Exit For
             key = RoomKey(ws.Cells(r, "B").Value & "")
             curName = Trim$(ws.Cells(r, "A").Value & "")
-            If key <> "" And curName <> "" Then
+            If key <> "" Then
+                If curName <> "" Then filled = filled + 1
                 If data.Exists(key) Then
-                    If NameKey(curName) <> NameKey(data(key)("A")) Then
+                    seen(key) = True
+                    If curName <> "" And NameKey(curName) <> NameKey(data(key)("A")) Then
                         changedList = changedList & vbLf & "   " & key & ":  " & OneLine(curName) & "  ->  " & data(key)("A")
-                        toClear.Add Array(s, r)
+                        toReplace.Add Array(s, r)
                     End If
-                Else
-                    vacatedList = vacatedList & vbLf & "   " & key & ":  " & OneLine(curName)
-                    toClear.Add Array(s, r)
+                ElseIf RowHasText(ws, r) Then
+                    vacatedList = vacatedList & vbLf & "   " & key & ":  " & IIf(curName = "", "(no name)", OneLine(curName))
+                    toVacate.Add Array(s, r)
                 End If
             End If
-            If key <> "" And data.Exists(key) Then seen(key) = True
         Next r
     Next s
 
-    If toClear.Count > 0 Then
-        If changedList <> "" Then msg = msg & "New patient in these rooms:" & changedList & vbLf & vbLf
-        If vacatedList <> "" Then msg = msg & "No longer on the WellSky census:" & vacatedList & vbLf & vbLf
-        msg = msg & "Clear the old patient's info in these rows (every column except RM#)?" & vbLf & _
-                    "Yes = clear,  No = leave it,  Cancel = stop without changing anything."
-        answer = MsgBox(msg, vbYesNoCancel + vbQuestion, "WellSky update")
-        If answer = vbCancel Then Exit Sub
+    ' Guard against the wrong facility's export wiping the sheets.
+    If data.Count > 0 And seen.Count = 0 Then
+        MsgBox "None of the rooms in this WellSky export are on the schedule sheets, so nothing was changed." & vbLf & _
+               "Check the facility picked in the WorkWithPriends header and copy again.", vbExclamation, "WellSky update"
+        Exit Sub
+    End If
+    If toVacate.Count > 5 And toVacate.Count * 2 > filled Then
+        If MsgBox("WellSky has nobody in " & toVacate.Count & " of the " & filled & " filled rooms:" & vacatedList & vbLf & vbLf & _
+                  "Clear them all?  (No = update everything else and leave these rows.)", _
+                  vbYesNo + vbExclamation, "WellSky update") = vbNo Then
+            Set toVacate = New Collection
+            vacatedList = ""
+        End If
     End If
 
     '--- 4. Write ---
@@ -105,14 +115,11 @@ Public Sub UpdateFromWellSky()
         If wasProtected(s) Then ws.Unprotect
     Next s
 
-    If toClear.Count > 0 And answer = vbYes Then
-        For Each item In toClear
-            Set ws = tgt(item(0))
-            ws.Cells(item(1), "A").ClearContents
-            ws.Range(ws.Cells(item(1), "C"), ws.Cells(item(1), "P")).ClearContents
-            cleared = cleared + 1
-        Next item
-    End If
+    ' New patient in the room: clear the old one first so nothing carries over.
+    For Each item In toReplace
+        Set ws = tgt(item(0))
+        ClearPatientRow ws, CLng(item(1))
+    Next item
 
     For s = 0 To UBound(tgt)
         Set ws = tgt(s)
@@ -137,6 +144,13 @@ Public Sub UpdateFromWellSky()
         Next r
     Next s
 
+    '--- 5. Cleanup: discharged (or wrongly added) patients ---
+    For Each item In toVacate
+        Set ws = tgt(item(0))
+        ClearPatientRow ws, CLng(item(1))
+        cleared = cleared + 1
+    Next item
+
     For Each item In data.Keys
         If Not seen.Exists(item) Then notOnSheet = notOnSheet & vbLf & "   " & item & ":  " & data(item)("A")
     Next item
@@ -152,7 +166,8 @@ CleanUp:
     On Error GoTo 0
 
     msg = errMsg & "Updated " & updated & " patient row(s)."
-    If cleared > 0 Then msg = msg & vbLf & "Cleared " & cleared & " old row(s)."
+    If changedList <> "" Then msg = msg & vbLf & vbLf & "New patient in these rooms:" & changedList
+    If cleared > 0 Then msg = msg & vbLf & vbLf & "Cleared (not on the WellSky census):" & vacatedList
     If notOnSheet <> "" Then msg = msg & vbLf & vbLf & "Room not found on the schedule:" & notOnSheet
     If noRoom <> "" Then msg = msg & vbLf & vbLf & "No room assigned in WellSky:" & noRoom
     MsgBox msg, IIf(errMsg = "", vbInformation, vbExclamation), "WellSky update"
@@ -178,6 +193,26 @@ Private Sub ApplyValue(c As Range, ByVal v As String)
         WriteText c, v
     End If
 End Sub
+
+' Clears A and C:P on one row (column B and any formulas stay).
+Private Sub ClearPatientRow(ws As Worksheet, ByVal r As Long)
+    Dim c As Range
+    For Each c In Union(ws.Cells(r, "A"), ws.Range(ws.Cells(r, "C"), ws.Cells(r, "P"))).Cells
+        If c.MergeCells Then
+            If c.Address = c.MergeArea.Cells(1, 1).Address And Not c.HasFormula Then c.MergeArea.ClearContents
+        ElseIf Not c.HasFormula Then
+            c.ClearContents
+        End If
+    Next c
+End Sub
+
+' True if A or C:P has any typed-in text (formulas don't count).
+Private Function RowHasText(ws As Worksheet, ByVal r As Long) As Boolean
+    Dim c As Range
+    For Each c In Union(ws.Cells(r, "A"), ws.Range(ws.Cells(r, "C"), ws.Cells(r, "P"))).Cells
+        If Not c.HasFormula And Len(Trim$(c.Value & "")) > 0 Then RowHasText = True: Exit Function
+    Next c
+End Function
 
 ' Team stays a number; anything Excel would turn into a date/number stays text.
 Private Sub WriteText(c As Range, ByVal v As String)

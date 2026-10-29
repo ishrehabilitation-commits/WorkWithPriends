@@ -133,7 +133,7 @@
       <p class="status" role="status"></p>
       <div class="view">
         <div class="cz-stats"></div>
-        <div class="scroll"><table class="cz-census">
+        <div class="cz-scroll"><table class="cz-census">
           <thead><tr>
             <th data-key="room">Room</th><th data-key="name">Patient</th><th data-key="type">Type</th>
             <th data-key="admit">Admit / From</th><th data-key="physician">Physician</th><th>Case Mgr</th>
@@ -144,7 +144,7 @@
           <tbody><tr><td colspan="13" class="cz-empty">Refresh to load the census.</td></tr></tbody>
         </table></div>
         <h2 class="cz-dctitle">Recent discharges</h2>
-        <div class="scroll"><table class="cz-dc">
+        <div class="cz-scroll"><table class="cz-dc">
           <thead><tr><th>D/C</th><th>Patient</th><th>Room</th><th>Type</th><th>Admit</th><th>Discharged to</th></tr></thead>
           <tbody></tbody>
         </table></div>
@@ -160,7 +160,7 @@
     function visiblePatients() {
       const q = $('[name=search]').value.trim().toLowerCase();
       const { key, dir } = state.sort;
-      const val = r => ({ room: r.room, name: r.name, type: r.type, admit: Number(r.admitDate), physician: r.physician, team: r.team })[key];
+      const val = r => ({ room: r.room, name: r.name, type: r.type, admit: Number(r.admitDate), physician: r.physician, team: r.team ?? 0 })[key];
       return state.patients
         .filter(r => settings.types.includes(r.type))
         .filter(r => !q || [r.name, r.room, r.acct, r.mrn, r.physician, r.caseManager].join(' ').toLowerCase().includes(q))
@@ -211,7 +211,7 @@
           <td><div>${esc(r.physician || '—')}</div><div class="cz-sub">${esc(r.coPhysician)}</div></td>
           <td>${esc(r.caseManager || '—')}</td>
           ${discCell(r, 'PT')}${discCell(r, 'OT')}${discCell(r, 'ST')}
-          <td class="c">${yn(r.mobility)}</td><td class="c">${yn(r.group)}</td><td class="c cz-team">${esc(r.team)}</td>
+          <td class="c">${yn(r.mobility)}</td><td class="c">${yn(r.group)}</td><td class="c cz-team">${esc(r.team ?? '')}</td>
           <td>${r.dcStatus || r.dcTo ? `<div>${esc(r.dcTo || '—')}</div><div class="cz-sub">${esc(r.dcStatus)}</div>` : '<span class="cz-muted">—</span>'}</td>
         </tr>`).join('') || '<tr><td colspan="13" class="cz-empty">No patients match.</td></tr>';
 
