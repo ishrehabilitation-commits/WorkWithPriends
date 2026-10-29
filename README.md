@@ -57,7 +57,8 @@ one-time updater setup in [`updater/`](updater/README.md).
 ## Updates
 
 The dashboard checks GitHub for a newer `version` in `manifest.json` every six
-hours. When one is out, it shows **Update now**, which runs `git pull` through
+hours (click **Check now** next to the version number to check right away).
+When one is out, it shows **Update now**, which runs `git pull` through
 the helper in `updater/` and reloads the extension. To ship an update, bump
 `version` in `manifest.json` and merge to `main`.
 

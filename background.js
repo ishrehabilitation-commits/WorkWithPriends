@@ -28,9 +28,9 @@ const isNewer = (a, b) => {
   return false;
 };
 
-async function latestVersion() {
+async function latestVersion(force) {
   const { updateCheck } = await chrome.storage.local.get("updateCheck");
-  if (updateCheck && Date.now() - updateCheck.at < UPDATE_CHECK_EVERY_MS) return updateCheck.version;
+  if (!force && updateCheck && Date.now() - updateCheck.at < UPDATE_CHECK_EVERY_MS) return updateCheck.version;
   // Offline, or the repo isn't readable without signing in: say nothing.
   const res = await fetch(LATEST_MANIFEST_URL, { cache: "no-store" });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -43,7 +43,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id) return;
   if (msg?.type === "wwp:checkUpdate") {
     const current = chrome.runtime.getManifest().version;
-    latestVersion()
+    latestVersion(!!msg.force)
       .then((latest) => sendResponse({ current, latest, outdated: isNewer(latest, current) }))
       .catch(() => sendResponse({ current, latest: null, outdated: false }));
     return true;
