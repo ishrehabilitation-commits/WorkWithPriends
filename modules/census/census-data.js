@@ -17,6 +17,9 @@
     { code: '203', name: 'Bossier' },
   ];
 
+  // The only second doctor that goes on the schedule is a physiatrist (by last name).
+  const PHYSIATRISTS = ['GURWARA'];
+
   // Patient types we can't be consulted on — always hidden.
   const EXCLUDED_TYPES = /respite|hospice/i;
 
@@ -333,7 +336,9 @@
     const sx = String(sex || '').charAt(0).toUpperCase();
     return `${properWord(last.trim())}, ${properWord(first)}` + (age !== '' && age != null ? ` (${age}${sx})` : '');
   }
-  const docLast = n => properWord(String(n || '').split(',')[0].trim());
+  // "Akbarian Tefaghi, Moha" -> "Akbarian": first word before the comma.
+  const docLast = n => properWord(String(n || '').split(',')[0].trim().split(/\s+/)[0]);
+  const isPhysiatrist = n => PHYSIATRISTS.includes(docLast(n).toUpperCase());
   function scheduleRoom(room) {
     const m = String(room || '').match(/(\d{3}[A-Z])$/i);
     return m ? m[1].toUpperCase() : '';
@@ -363,7 +368,9 @@
     const group = groups.length ? (groups.includes('Yes') ? 'Y' : 'N') : '';
     const team = r.team ? String(r.team) : '';
     const evals = ['PT', 'OT', 'ST'].map(d => r[d].evalDate).filter(Boolean).map(Number);
-    const docs = [...new Set([docLast(r.physician), docLast(r.coPhysician)].filter(Boolean))];
+    // Primary on line 1; a second line only for a physiatrist (co-physician or a consult order).
+    const second = [r.coPhysician, r.physiatristConsult].find(isPhysiatrist);
+    const docs = [...new Set([docLast(r.physician), second ? docLast(second) : ''].filter(Boolean))];
     return {
       room: scheduleRoom(r.room), acct: r.acct,
       A: scheduleName(r.rawName, r.age, r.sex),
@@ -375,10 +382,12 @@
     };
   }
   const SCHEDULE_COLS = ['room', 'A', 'C', 'F', 'G', 'H', 'I', 'J', 'K', 'M', 'N', 'P', 'acct'];
-  function scheduleTsv(patients, facility, now = new Date()) {
+  // opts.fillBlanksOnly: when the room already has this patient, the macro only fills empty cells.
+  function scheduleTsv(patients, facility, now = new Date(), opts = {}) {
     const esc = v => String(v ?? '').replace(/\\/g, '\\\\').replace(/\t/g, ' ').replace(/\r?\n/g, '\\n');
     const rows = patients.map(scheduleRow);
-    return [`#WELLSKY-SCHEDULE\tv1\t${facility}\t${now.toISOString()}`, SCHEDULE_COLS.join('\t'),
+    const flags = opts.fillBlanksOnly ? '\tfillBlanks=1' : '';
+    return [`#WELLSKY-SCHEDULE\tv1\t${facility}\t${now.toISOString()}${flags}`, SCHEDULE_COLS.join('\t'),
       ...rows.map(r => SCHEDULE_COLS.map(c => esc(r[c])).join('\t'))].join('\r\n');
   }
 

@@ -20,6 +20,11 @@
   //  Panel (Shadow DOM keeps ExtJS styles and ours from colliding)      //
   // ------------------------------------------------------------------ //
 
+  // After an update or reload the old copy of this script is cut off from the
+  // extension; remove its panel so only this one answers the toolbar button.
+  document.getElementById("wwp-dashboard-host")?.remove();
+  document.getElementById("wwp-toast-host")?.remove();
+
   const host = document.createElement("div");
   host.id = "wwp-dashboard-host";
   host.style.cssText =
@@ -49,6 +54,7 @@
   // A small note in the corner for messages that arrive while the panel is
   // hidden, such as a module stepping through a note in WellSky.
   const toastHost = document.createElement("div");
+  toastHost.id = "wwp-toast-host";
   toastHost.style.cssText = "all:initial;position:fixed;right:18px;bottom:18px;z-index:2147483001;";
   const toastRoot = toastHost.attachShadow({ mode: "open" });
   toastRoot.innerHTML = `
@@ -83,6 +89,9 @@
 
   async function togglePanel(force) {
     const show = force ?? !isOpen();
+    // WellSky sometimes rebuilds the page and drops our panel with it.
+    if (!host.isConnected) document.documentElement.appendChild(host);
+    if (!toastHost.isConnected) document.documentElement.appendChild(toastHost);
     host.style.display = show ? "block" : "none";
     if (show) {
       toastRoot.querySelector("p").hidden = true;
@@ -114,6 +123,7 @@
   //   id, label   names the tab
   //   init(view, ctx)   draws into its own <section>; may return { onShow }
   function addTab({ id, label, init }) {
+    if (tabs.some((t) => t.id === id)) return; // module script ran twice (loaded again on click)
     const btn = document.createElement("button");
     btn.type = "button";
     btn.setAttribute("role", "tab");
@@ -219,8 +229,13 @@
     });
   }
 
-  chrome.runtime.onMessage.addListener((msg) => {
-    if (msg?.type === "wwp:toggle") togglePanel();
+  chrome.runtime.onMessage.addListener((msg, sender, reply) => {
+    if (msg?.type === "wwp:toggle") {
+      togglePanel()
+        .then(() => reply({ ok: true, open: isOpen() }))
+        .catch((e) => reply({ ok: false, error: e.message }));
+      return true;
+    }
   });
 
   window.WWP = { addTab };

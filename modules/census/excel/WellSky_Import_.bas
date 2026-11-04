@@ -9,6 +9,9 @@ Option Explicit
 ' Cell formatting is never changed. Rooms are matched on column B.
 ' At the end, rows whose room has nobody on the WellSky census (discharged,
 ' or added by mistake) are cleared in A and C:P. Column B and formulas stay.
+' Rows whose column D says DIALYSIS ROOM are never touched.
+' With "Same patient in room: only fill blanks" ticked in the Census tab, a row
+' that already has the same patient only gets its empty cells filled.
 '**************************************************************************
 
 Private Const TAG As String = "#WELLSKY-SCHEDULE"
@@ -25,6 +28,7 @@ Public Sub UpdateFromWellSky()
     Dim noRoom As String, notOnSheet As String, changedList As String, vacatedList As String
     Dim toReplace As Collection, toVacate As Collection, item As Variant
     Dim updated As Long, cleared As Long, filled As Long
+    Dim fillBlanks As Boolean, blankOnly As Boolean
 
     '--- 1. Get the export (clipboard first, then ask for the file) ---
     txt = ClipboardText()
@@ -44,6 +48,7 @@ Public Sub UpdateFromWellSky()
     txt = Replace(txt, vbCrLf, vbLf)
     lines = Split(txt, vbLf)
     If UBound(lines) < 1 Then Exit Sub
+    fillBlanks = InStr(lines(0), vbTab & "fillBlanks=1") > 0
     hdr = Split(lines(1), vbTab)
     Set data = CreateObject("Scripting.Dictionary")
     Set seen = CreateObject("Scripting.Dictionary")
@@ -73,7 +78,7 @@ Public Sub UpdateFromWellSky()
             If UCase$(Trim$(ws.Cells(r, "B").Value & "")) = "RM#" Then Exit For
             key = RoomKey(ws.Cells(r, "B").Value & "")
             curName = Trim$(ws.Cells(r, "A").Value & "")
-            If key <> "" Then
+            If key <> "" And Not IsDialysisRow(ws, r) Then
                 If curName <> "" Then filled = filled + 1
                 If data.Exists(key) Then
                     seen(key) = True
@@ -126,19 +131,22 @@ Public Sub UpdateFromWellSky()
         For r = 3 To MAX_ROW
             If UCase$(Trim$(ws.Cells(r, "B").Value & "")) = "RM#" Then Exit For
             key = RoomKey(ws.Cells(r, "B").Value & "")
-            If key <> "" And data.Exists(key) Then
+            If key <> "" And data.Exists(key) And Not IsDialysisRow(ws, r) Then
                 Set rec = data(key)
-                ApplyValue ws.Cells(r, "A"), rec("A")
-                ApplyValue ws.Cells(r, "C"), rec("C")
-                ApplyValue ws.Cells(r, "F"), rec("F")
-                ApplyValue ws.Cells(r, "G"), rec("G")
-                ApplyValue ws.Cells(r, "H"), rec("H")
-                ApplyValue ws.Cells(r, "I"), rec("I")
-                ApplyValue ws.Cells(r, "J"), rec("J")
-                ApplyValue ws.Cells(r, "K"), rec("K")
-                ApplyValue ws.Cells(r, "M"), rec("M")
-                ApplyValue ws.Cells(r, "N"), rec("N")
-                ApplyValue ws.Cells(r, "P"), rec("P")
+                ' Same patient already in the room: only fill what's empty.
+                curName = Trim$(ws.Cells(r, "A").Value & "")
+                blankOnly = fillBlanks And curName <> "" And NameKey(curName) = NameKey(rec("A"))
+                ApplyValue ws.Cells(r, "A"), rec("A"), blankOnly
+                ApplyValue ws.Cells(r, "C"), rec("C"), blankOnly
+                ApplyValue ws.Cells(r, "F"), rec("F"), blankOnly
+                ApplyValue ws.Cells(r, "G"), rec("G"), blankOnly
+                ApplyValue ws.Cells(r, "H"), rec("H"), blankOnly
+                ApplyValue ws.Cells(r, "I"), rec("I"), blankOnly
+                ApplyValue ws.Cells(r, "J"), rec("J"), blankOnly
+                ApplyValue ws.Cells(r, "K"), rec("K"), blankOnly
+                ApplyValue ws.Cells(r, "M"), rec("M"), blankOnly
+                ApplyValue ws.Cells(r, "N"), rec("N"), blankOnly
+                ApplyValue ws.Cells(r, "P"), rec("P"), blankOnly
                 updated = updated + 1
             End If
         Next r
@@ -178,9 +186,14 @@ End Sub
 '   {CLEAR}       clear it
 '   {IFBLANK}x    write x only if the cell is empty
 '   {LINE1}x      replace the first line, keep any later lines (Admit / D/C)
-Private Sub ApplyValue(c As Range, ByVal v As String)
+' blankOnly: only write into an empty cell, and never clear.
+Private Sub ApplyValue(c As Range, ByVal v As String, Optional ByVal blankOnly As Boolean = False)
     Dim cur As String, p As Long
     If v = "" Then Exit Sub
+    If blankOnly Then
+        If Len(Trim$(c.Value & "")) > 0 Or v = "{CLEAR}" Then Exit Sub
+        If Left$(v, 9) = "{IFBLANK}" Then v = Mid$(v, 10)
+    End If
     If v = "{CLEAR}" Then
         c.ClearContents
     ElseIf Left$(v, 9) = "{IFBLANK}" Then
@@ -205,6 +218,11 @@ Private Sub ClearPatientRow(ws As Worksheet, ByVal r As Long)
         End If
     Next c
 End Sub
+
+' The therapist marks dialysis-room rows in column D; those rows are left alone.
+Private Function IsDialysisRow(ws As Worksheet, ByVal r As Long) As Boolean
+    IsDialysisRow = InStr(1, ws.Cells(r, "D").Value & "", "DIALYSIS ROOM", vbTextCompare) > 0
+End Function
 
 ' True if A or C:P has any typed-in text (formulas don't count).
 Private Function RowHasText(ws As Worksheet, ByVal r As Long) As Boolean

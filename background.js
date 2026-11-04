@@ -98,9 +98,42 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true; // keep the channel open for the async response
 });
 
-chrome.action.onClicked.addListener((tab) => {
+// Toolbar button. If the dashboard doesn't answer (the page was open before an
+// update or reload, or is still loading), load it into the page and try again.
+// When it still can't open, the button shows a red "!" and its tooltip says why.
+const WELLSKY_TAB = /^https:\/\/[^/]+\.specialtycare\.wellsky\.com\//;
+const toggle = (tabId) => chrome.tabs.sendMessage(tabId, { type: "wwp:toggle" }, { frameId: 0 });
+
+async function showProblem(tabId, why) {
+  console.warn("[WWP] dashboard didn't open:", why);
+  const defaultTitle = chrome.runtime.getManifest().action.default_title;
+  await chrome.action.setBadgeBackgroundColor({ tabId, color: "#b2412f" });
+  await chrome.action.setBadgeText({ tabId, text: "!" });
+  await chrome.action.setTitle({ tabId, title: `WorkWithPriends couldn't open: ${why}` });
+  setTimeout(() => {
+    chrome.action.setBadgeText({ tabId, text: "" }).catch(() => {});
+    chrome.action.setTitle({ tabId, title: defaultTitle }).catch(() => {});
+  }, 20000);
+}
+
+chrome.action.onClicked.addListener(async (tab) => {
   if (!tab.id) return;
-  chrome.tabs.sendMessage(tab.id, { type: "wwp:toggle" }).catch(() => {
-    // Not a WellSky tab (no content script there) — nothing to toggle.
-  });
+  chrome.action.setBadgeText({ tabId: tab.id, text: "" }).catch(() => {});
+  if (!WELLSKY_TAB.test(tab.url ?? "")) {
+    return showProblem(tab.id, "this tab isn't WellSky. Click the button on a WellSky tab.");
+  }
+  try {
+    await toggle(tab.id);
+    return;
+  } catch (first) {
+    console.warn("[WWP] dashboard not answering, loading it again:", first.message);
+  }
+  try {
+    const { js } = chrome.runtime.getManifest().content_scripts.find((c) => c.js.includes("dashboard.js"));
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: js });
+    const res = await toggle(tab.id);
+    if (!res?.ok) throw new Error(res?.error ?? "the dashboard didn't answer");
+  } catch (e) {
+    showProblem(tab.id, `${e.message}. Refresh the WellSky page (F5) and try again.`);
+  }
 });
