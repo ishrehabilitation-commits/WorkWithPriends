@@ -167,6 +167,22 @@
       },
     });
   }
+  // Physiatry consult orders (CON019). One-time orders end the minute they're placed,
+  // so any consult on a current patient counts, not just active ones.
+  function buildConsultsBody({ userId, token, facility, to }) {
+    const body = JSON.parse(buildOrdersBody({ userId, token, facility, to }));
+    Object.assign(body.data, { FROMDATE: '20000101', PROCCOD: ['CON019'], PROCCOUNT: 1, REQNOORDER: 'NO' });
+    return JSON.stringify(body);
+  }
+  // "Consulting Provider: dr. gurwara" (also typed "Guwara") -> "GURWARA, " so docLast reads it.
+  function consultPhysiatrist(desc) {
+    const t = String(desc || '').replace(/<[^>]*>/g, '');
+    if (!/physiatr/i.test(t)) return null;
+    const m = t.match(/Consulting Provider:\s*(?:dr\.?\s*)?([A-Za-z'-]+)/i);
+    const name = m && /^gu\w*wara$/i.test(m[1]) ? 'GURWARA' : (m ? m[1].toUpperCase() : PHYSIATRISTS[0]);
+    return name + ', ';
+  }
+
   function parseOrders(text) {
     const j = typeof text === 'string' ? JSON.parse(text) : text;
     if (j.RTRNCD) throw new Error('HOHORLST error: ' + j.RTRNCD);
@@ -244,6 +260,12 @@
       for (const r of src.fmp?.[d] || []) if (r.MRN) mrn.set(String(r.ACC), r.MRN);
     }
 
+    const consult = new Map();
+    for (const o of src.consults || []) {
+      const who = consultPhysiatrist(o.ORDERDESC);
+      if (who) consult.set(String(o.ACCOUNTNUM), who);
+    }
+
     const patients = (src.current || [])
       .filter(p => !EXCLUDED_TYPES.test(p.MMPCT1 || ''))
       .map(p => {
@@ -252,6 +274,7 @@
           acct, mrn: mrn.get(acct) || '', room: p.MMPRMN || '', name: titleName(p.MMNAME), rawName: p.MMNAME,
           age: p.MMPAGE ?? '', sex: p.MMPSEX || '', type: typeKey(p.MMPCT1), typeRaw: p.MMPCT1 || '',
           physician: p.PHY_AM || '', coPhysician: p.CURPHY_CO || '', caseManager: p.CASE_MAN || '',
+          physiatristConsult: consult.get(acct) || '',
           admitDate: p.MMADDT, los: daysBetween(p.MMADDT, now),
           admitFrom: p.MMPAFM || '', admitFromType: p.MMPAFM_TYP || '',
           dcTo: p.MMPDTO || '', dcStatus: p.MMDSST || '', dcDate: p.MMDSDT || 0,
@@ -392,7 +415,7 @@
   }
 
   const api = {
-    RS, DATAHUB_URL, HXHFRPT_URL, ORDERS_URL, buildOrdersBody, parseOrders, orderInfo, FACILITIES, EVAL_FORMS, HX_QUESTIONS, PATIENT_FIELDS, TYPE_LABEL,
+    RS, DATAHUB_URL, HXHFRPT_URL, ORDERS_URL, buildOrdersBody, buildConsultsBody, consultPhysiatrist, parseOrders, orderInfo, FACILITIES, EVAL_FORMS, HX_QUESTIONS, PATIENT_FIELDS, TYPE_LABEL,
     ymd, daysAgoYmd, fmtDate, daysBetween, buildDataHubBody, patientListQuery, evalFormQuery, parseDataHub,
     buildHxBody, parseHx, parseFmp, scheduleRow, scheduleTsv, scheduleName, scheduleRoom, mergeData, typeKey, toCsv, CENSUS_COLUMNS, DISCHARGE_COLUMNS,
   };

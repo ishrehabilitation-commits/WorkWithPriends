@@ -95,3 +95,16 @@ test('schedule export: physician lines and the fill-blanks flag', () => {
   assert.match(WS.scheduleTsv(patients, '204', now, { fillBlanksOnly: true }).split('\r\n')[0], /\tfillBlanks=1$/);
   assert.doesNotMatch(WS.scheduleTsv(patients, '204', now).split('\r\n')[0], /fillBlanks/);
 });
+
+test('physiatry consult orders add the second doctor line', () => {
+  assert.equal(WS.consultPhysiatrist('<b>Physiatry Consult</b> Now, Consulting Provider: dr. Guwara'), 'GURWARA, ');
+  assert.equal(WS.consultPhysiatrist('<b>PT Eval</b>'), null);
+  const body = JSON.parse(WS.buildConsultsBody({ userId: 'U', token: 'T', facility: '204', to: 20261104 }));
+  assert.deepEqual([body.data.PROCCOD, body.data.FROMDATE, body.data.REQNOORDER], [['CON019'], '20000101', 'NO']);
+  const { patients } = WS.mergeData({
+    current: [patient('7', 'SAMP00114A', 'LTCH', { PHY_AM: 'STUART, ANN MD', CURPHY_CO: '' })],
+    evals: { PT: [], OT: [], ST: [] },
+    consults: [{ ACCOUNTNUM: '7', ORDERDESC: '<b>Physiatry Consult</b> One Time Only, Consulting Provider: gurwara' }],
+  }, now);
+  assert.equal(WS.scheduleRow(patients[0]).C, 'Stuart\nGurwara');
+});
