@@ -113,7 +113,7 @@
 
   function init(view, ctx) {
     const { esc } = ctx;
-    const settings = { dcDays: 7, types: TYPES.map(([k]) => k) };
+    const settings = { dcDays: 7, types: TYPES.map(([k]) => k), fillBlanksOnly: true };
     const state = { patients: [], discharges: [], sort: { key: 'room', dir: 1 }, loaded: false, busy: false, facility: null };
 
     view.classList.add('census');
@@ -129,6 +129,7 @@
         <button type="button" data-a="csvDc">Discharges CSV</button>
         <button type="button" data-a="sched" title="Copies the data for the Excel macro UpdateFromWellSky">Copy for Schedule</button>
         <button type="button" data-a="schedFile" title="Same data as a file, if the clipboard doesn't work">Schedule file</button>
+        <label class="disch" title="When the schedule already has this patient in the room, the Excel macro only fills empty cells (like a missing eval or admit date) and changes nothing else."><input type="checkbox" name="fillBlanksOnly"> Same patient in room: only fill blanks</label>
       </div>
       <p class="status" role="status"></p>
       <div class="view">
@@ -256,7 +257,7 @@
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     }
     const stamp = () => `${state.facility}_${WS.ymd(new Date())}`;
-    const schedText = () => WS.scheduleTsv(state.patients, state.facility);
+    const schedText = () => WS.scheduleTsv(state.patients, state.facility, new Date(), { fillBlanksOnly: settings.fillBlanksOnly });
 
     const saveSettings = () => chrome.storage.sync.set({ census: settings });
     view.addEventListener('submit', e => { e.preventDefault(); refresh(); });
@@ -267,6 +268,10 @@
         e.target.value = settings.dcDays;
         saveSettings();
         if (state.loaded) refresh();
+      }
+      if (e.target.name === 'fillBlanksOnly') {
+        settings.fillBlanksOnly = e.target.checked;
+        saveSettings();
       }
       if (e.target.name === 'type') {
         settings.types = [...view.querySelectorAll('[name=type]:checked')].map(c => c.value);
@@ -302,6 +307,7 @@
     chrome.storage.sync.get('census').then(({ census }) => {
       Object.assign(settings, census || {});
       $('[name=dcDays]').value = settings.dcDays;
+      $('[name=fillBlanksOnly]').checked = settings.fillBlanksOnly;
       view.querySelectorAll('[name=type]').forEach(cb => { cb.checked = settings.types.includes(cb.value); });
     });
 

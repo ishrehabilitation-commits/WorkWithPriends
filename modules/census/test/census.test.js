@@ -54,7 +54,7 @@ test('schedule export: room, name, columns and macro markers', () => {
   const row = WS.scheduleRow(patients[0]);
   assert.equal(row.room, '360A');
   assert.equal(row.A, 'McDoe, John (64M)');
-  assert.equal(row.C, 'Smith\nJones');
+  assert.equal(row.C, 'Smith'); // Jones isn't a physiatrist
   assert.deepEqual([row.F, row.G, row.H], ['No\nOT', 'Y', 'N']);
   assert.equal(row.K, '{CLEAR}');
   assert.equal(row.I, '');
@@ -83,4 +83,15 @@ test('schedule export: new eval is Y; team and group only when the form says so'
   assert.deepEqual([stated.M, stated.I], ['2', '']);
   assert.deepEqual([none.M, none.I, none.G], ['', '', 'Y']);
   assert.equal(patients[2].team, null);
+});
+
+test('schedule export: physician lines and the fill-blanks flag', () => {
+  const src = (extra) => ({ current: [patient('1', 'SAMP00114A', 'LTCH', extra)], evals: { PT: [], OT: [], ST: [] } });
+  const C = extra => WS.scheduleRow(WS.mergeData(src(extra), now).patients[0]).C;
+  assert.equal(C({ PHY_AM: 'STUART, ANN MD', CURPHY_CO: 'GURWARA, SAM MD' }), 'Stuart\nGurwara');
+  assert.equal(C({ PHY_AM: 'AKBARIAN TEFAGHI, MOHA', CURPHY_CO: '' }), 'Akbarian');
+  assert.equal(C({ PHY_AM: 'STUART, ANN MD', CURPHY_CO: 'JONES, BOB MD' }), 'Stuart');
+  const { patients } = WS.mergeData(src({}), now);
+  assert.match(WS.scheduleTsv(patients, '204', now, { fillBlanksOnly: true }).split('\r\n')[0], /\tfillBlanks=1$/);
+  assert.doesNotMatch(WS.scheduleTsv(patients, '204', now).split('\r\n')[0], /fillBlanks/);
 });

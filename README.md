@@ -54,6 +54,14 @@ send it to a coworker or put it on a network share.
 Developer mode, click **Load unpacked** and pick the folder. Then run the
 one-time updater setup in [`updater/`](updater/README.md).
 
+## If the dashboard doesn't open
+
+If clicking the toolbar button does nothing, the extension loads the dashboard
+into the page again by itself. If that also fails, the button shows a red **!**
+for 20 seconds, and hovering over it says why. Usually the fix is to refresh the
+WellSky page (F5). For more detail, open the extensions page, click **service
+worker** on the WorkWithPriends card and look for lines starting with `[WWP]`.
+
 ## Updates
 
 The dashboard checks GitHub for a newer `version` in `manifest.json` every six
@@ -90,7 +98,11 @@ the helper in `updater/` and reloads the extension. To ship an update, bump
   (keeping B and formulas) for rooms nobody on the WellSky census is in. Team is
   written only for FMP patients (3) or when the PT/OT eval states it, and Group
   only when stated; otherwise those cells are left alone. A new eval order shows
-  as Y. Tests: `node --test modules/census/test/*.test.js`
+  as Y. Rows with DIALYSIS ROOM in column D are never touched. With **Same
+  patient in room: only fill blanks** ticked (the default), a row that already
+  has the same patient only gets its empty cells filled. Column C is the primary
+  doctor's last name (first word before the comma), plus a second line only for
+  a physiatrist (Gurwara). Tests: `node --test modules/census/test/*.test.js`
   (made-up data only).
 - `background.js`: session cookies, the update check, the toolbar button and
   the LTRAX sync.
