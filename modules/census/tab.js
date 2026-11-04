@@ -61,10 +61,11 @@
 
     setStatus('Pulling census, discharges and evaluations…');
     const evalReqs = DISC.flatMap(d => WS.EVAL_FORMS[d].map(f => ({ d, q: WS.evalFormQuery(fac, f) })));
-    const [cur, dc, ord, ...ev] = await Promise.all([
+    const [cur, dc, ord, con, ...ev] = await Promise.all([
       dataHub(WS.patientListQuery(fac), token),
       dataHub(WS.patientListQuery(fac, WS.daysAgoYmd(dcDays)), token),
       json(WS.ORDERS_URL, WS.buildOrdersBody({ userId, token, facility: fac, to: today })),
+      json(WS.ORDERS_URL, WS.buildConsultsBody({ userId, token, facility: fac, to: today })),
       ...evalReqs.map(e => dataHub(e.q, token)),
     ]);
     const current = WS.parseDataHub(cur.text);
@@ -74,6 +75,8 @@
     const warnings = [];
     let orders = null;
     try { orders = WS.parseOrders(ord.text); } catch { warnings.push('Orders: could not load'); }
+    let consults = [];
+    try { consults = WS.parseOrders(con.text); } catch { warnings.push('Physiatry consults: could not load'); }
 
     setStatus('Checking caseload pickup and FMP…');
     const admits = current.map(p => Number(p.MMADDT)).filter(Boolean);
@@ -102,7 +105,7 @@
       fmp[d] = res.flatMap(r => { try { return WS.parseHx(r.text); } catch { return []; } });
     }
 
-    return { ...WS.mergeData({ current, discharges, evals, noPickup, fmp, orders: orders || undefined }), warnings };
+    return { ...WS.mergeData({ current, discharges, evals, noPickup, fmp, orders: orders || undefined, consults }), warnings };
   }
 
   // ------------------------------------------------------------------ //
@@ -209,7 +212,7 @@
           <td><span class="cz-type">${esc(WS.TYPE_LABEL[r.type])}</span></td>
           <td><div>${esc(short(r.admitDate))} <span class="cz-muted">· day ${esc(r.los)}</span></div>
             <div class="cz-sub" title="${esc(r.admitFromType)}">${esc(r.admitFrom || '—')}</div></td>
-          <td><div>${esc(r.physician || '—')}</div><div class="cz-sub">${esc(r.coPhysician)}</div></td>
+          <td><div>${esc(r.physician || '—')}</div><div class="cz-sub">${esc(r.coPhysician)}</div>${r.physiatristConsult ? '<div class="cz-sub">Physiatry consult</div>' : ''}</td>
           <td>${esc(r.caseManager || '—')}</td>
           ${discCell(r, 'PT')}${discCell(r, 'OT')}${discCell(r, 'ST')}
           <td class="c">${yn(r.mobility)}</td><td class="c">${yn(r.group)}</td><td class="c cz-team">${esc(r.team ?? '')}</td>

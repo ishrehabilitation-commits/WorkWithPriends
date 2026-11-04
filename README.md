@@ -102,7 +102,8 @@ the helper in `updater/` and reloads the extension. To ship an update, bump
   patient in room: only fill blanks** ticked (the default), a row that already
   has the same patient only gets its empty cells filled. Column C is the primary
   doctor's last name (first word before the comma), plus a second line only for
-  a physiatrist (Gurwara). Tests: `node --test modules/census/test/*.test.js`
+  a physiatrist (Gurwara), taken from the co-physician or a Physiatry Consult
+  order (CON019). Tests: `node --test modules/census/test/*.test.js`
   (made-up data only).
 - `background.js`: session cookies, the update check, the toolbar button and
   the LTRAX sync.
