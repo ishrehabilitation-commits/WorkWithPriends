@@ -61,7 +61,14 @@ picker in the header applies to every tab.
   doppler (VENOUS UPPER/LOWER) orders placed in the last 48 hours, with time
   and status (discontinued ones in grey). They're matched on the order name,
   not its free-text description (which often says "intravenously"). Watch list:
-  `modules/census/concern-orders.js`. Tests: `node --test modules/census/test/*.test.js`.
+  `modules/census/concern-orders.js`.
+  The count tiles are filters (green = on). **LTAC**, **IRF** and
+  **Geri-Psych** show or hide that type. **PT/OT/ST caseload**, **Needs eval**
+  and **No therapy** (not on any caseload, no eval needed) are combined with
+  OR: a patient shows if any green tile in that group fits. **FMP**, **Lab
+  hold**, **Abnormal vitals 24h** and **Orders 48h** start off; turning one on
+  shows only patients that fit it (and every other one that's on). **Census**
+  resets everything, and **D/C** jumps to the discharges. Tests: `node --test modules/census/test/*.test.js`.
 
 Nothing is stored outside the browser. All tabs call WellSky with the session
 you are already signed in with.

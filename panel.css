@@ -229,6 +229,14 @@ td.tot { font-weight: 600; border-left: 1px solid var(--line); }
 .census .cz-stats { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 0; }
 .census .cz-stat { display: grid; min-width: 72px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 6px; }
 .census .cz-stat b { font-size: 17px; }
+.census .cz-statgrp { display: flex; flex-wrap: wrap; gap: 6px; padding-right: 8px; margin-right: 2px; border-right: 1px solid var(--line); }
+.census .cz-statgrp:last-child { border-right: 0; }
+.census .cz-stat.click { cursor: pointer; user-select: none; }
+.census .cz-stat.click:hover { border-color: #9fb3c8; }
+.census .cz-stat.on { border-color: var(--met); background: #e7f6ec; box-shadow: inset 0 0 0 1px var(--met); }
+.census .cz-stat.on b { color: var(--met); }
+.census .cz-stats.filtered .cz-stat[data-f="reset:"] { border-color: var(--behind); }
+.census .cz-stats.filtered .cz-stat[data-f="reset:"] span::after { content: " · reset"; color: var(--behind); }
 .census .cz-stat span { font-size: 11px; color: var(--muted); }
 .census table { font-size: 12px; }
 .census thead th { text-align: left; white-space: nowrap; }
