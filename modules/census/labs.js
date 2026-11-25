@@ -162,6 +162,19 @@
     return out.sort((a, b) => (b.latest - a.latest) || rank[a.level] - rank[b.level] || sortKey(b.date) - sortKey(a.date));
   }
 
+  /**
+   * WBC < 5.0 is only a hold with a fever. fever24 from the vitals:
+   * true -> hold, false (temps charted, none >= 100.4) -> dropped, null (no temps) -> stays 'check'.
+   */
+  function applyFever(flags, fever24) {
+    if (fever24 == null) return flags;
+    return flags.flatMap(f => {
+      if (f.label !== 'WBC' || f.level !== 'check' || !f.latest) return [f];
+      if (!fever24) return [];
+      return [{ ...f, level: 'hold', reason: '< 5.0 with fever (≥ 100.4 in last 24 h)' }];
+    });
+  }
+
   /** Short summary for a patient: the newest critical value of each lab. */
   function summarize(flags) {
     const seen = new Set(), list = [];
@@ -180,7 +193,7 @@
 
   const api = {
     CATEGORIES_URL, RESULTS_URL, buildCategoriesBody, buildResultsBody, parseCategories, parseResults,
-    cleanText, cleanNumber, evaluate, summarize, csvText, NUMERIC, INFECTION,
+    cleanText, cleanNumber, evaluate, applyFever, summarize, csvText, NUMERIC, INFECTION,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.WWPLabs = api;

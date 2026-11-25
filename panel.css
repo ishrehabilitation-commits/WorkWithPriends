@@ -275,7 +275,7 @@ td.tot { font-weight: 600; border-left: 1px solid var(--line); }
 .census .cz-census td.cz-empty { position: static; max-width: none; }
 .census .cz-census tr.has-labs td { border-bottom: 0; }
 .census .cz-census tr.cz-labrow td { position: static; min-width: 0; max-width: none; padding: 0 6px 6px; box-shadow: none; background: transparent; }
-.census .cz-labs { position: sticky; left: 0; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; padding-left: 70px; }
+.census .cz-labs { position: sticky; left: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; box-sizing: border-box; width: min(740px, calc(100vw - 40px)); padding-left: 70px; }
 .census .cz-labhd { font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
 .census .cz-lab { padding: 1px 6px; border-radius: 4px; font-size: 11px; white-space: nowrap; background: #eef0f4; color: var(--muted); }
 .census .cz-lab i { font-style: normal; font-size: 10px; font-weight: 700; }
@@ -284,3 +284,7 @@ td.tot { font-weight: 600; border-left: 1px solid var(--line); }
 .census .cz-lab.lv-flag { background: #fdf3e2; color: var(--behind); }
 .census .cz-lab.lv-check { background: #fff8d6; color: #7a5b00; }
 .census .cz-lab.lv-past { text-decoration: none; opacity: .85; }
+.census .cz-lab.lv-ok { background: #f2f5f8; color: var(--ink); }
+.census .cz-labs + .cz-labs { margin-top: 3px; }
+.census .cz-labhd { min-width: 5.5em; }
+.census .cz-break { flex-basis: 100%; height: 0; }

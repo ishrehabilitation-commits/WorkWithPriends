@@ -11,6 +11,7 @@
 (() => {
   const WS = window.WWPCensus;
   const LABS = window.WWPLabs;
+  const VIT = window.WWPVitals;
   const TYPES = [['LTCH', 'LTAC'], ['Rehab', 'IRF'], ['BHS', 'Geri-Psych'], ['Other', 'Other']];
   const DISC = ['PT', 'OT', 'ST'];
 
@@ -109,14 +110,21 @@
     return { ...WS.mergeData({ current, discharges, evals, noPickup, fmp, orders: orders || undefined, consults }), warnings };
   }
 
-  // Critical labs: per patient, HOHLABCAT for the categories, then HOHLRSLT
-  // from the admit date to today. A few patients at a time so WellSky isn't flooded.
-  async function loadLabs(patients, fac, onResult, isCurrent) {
+  // Per patient, after the census loads: critical labs (HOHLABCAT for the categories,
+  // then HOHLRSLT from the admit date to today) and vitals (HOHSVTSDJ, last 7 days).
+  // A few patients at a time so WellSky isn't flooded.
+  async function loadDetails(patients, fac, want, onResult, isCurrent) {
     const { token } = await getSession();
     const userId = await getUserId();
     const today = WS.ymd(new Date());
     const queue = patients.slice();
-    async function one(p) {
+    async function vitals(p) {
+      const from = Math.max(Number(p.admitDate) || 0, WS.daysAgoYmd(VIT.LOOKBACK_DAYS));
+      const res = await json(VIT.VITALS_URL, VIT.buildVitalsBody({ userId, token, facility: fac, account: p.acct, from, to: today }));
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return VIT.evaluate(VIT.parseVitals(res.text));
+    }
+    async function labs(p) {
       const ids = { userId, token, facility: fac, account: p.acct, mrn: p.mrn };
       const cat = await json(LABS.CATEGORIES_URL, LABS.buildCategoriesBody(ids));
       if (!cat.ok) throw new Error(`HTTP ${cat.status}`);
@@ -130,8 +138,12 @@
     async function worker() {
       while (queue.length && isCurrent()) {
         const p = queue.shift();
-        try { onResult(p.acct, { flags: await one(p) }); }
-        catch (e) { onResult(p.acct, { error: e.message }); }
+        const out = {};
+        await Promise.all([
+          want.labs && labs(p).then(f => { out.flags = f; }, e => { out.error = e.message; }),
+          want.vitals && vitals(p).then(v => { out.vitals = v; }, e => { out.vitalsError = e.message; }),
+        ]);
+        onResult(p.acct, out);
       }
     }
     await Promise.all(Array.from({ length: 4 }, worker));
@@ -145,7 +157,7 @@
 
   function init(view, ctx) {
     const { esc } = ctx;
-    const settings = { dcDays: 7, types: TYPES.map(([k]) => k), fillBlanksOnly: true, labs: true };
+    const settings = { dcDays: 7, types: TYPES.map(([k]) => k), fillBlanksOnly: true, labs: true, vitals: true };
     const state = { patients: [], discharges: [], sort: { key: 'room', dir: 1 }, loaded: false, busy: false, facility: null,
       labs: new Map(), labGen: 0, labsBusy: false };
 
@@ -163,6 +175,7 @@
         <button type="button" data-a="sched" title="Copies the data for the Excel macro UpdateFromWellSky">Copy for Schedule</button>
         <button type="button" data-a="schedFile" title="Same data as a file, if the clipboard doesn't work">Schedule file</button>
         <label class="disch" title="Pull each patient's labs since admit and flag critical values"><input type="checkbox" name="labs"> Critical labs</label>
+        <label class="disch" title="Latest vitals and any abnormal readings in the last 24 hours"><input type="checkbox" name="vitals"> Vitals</label>
         <label class="disch" title="When the schedule already has this patient in the room, the Excel macro only fills empty cells (like a missing eval or admit date) and changes nothing else."><input type="checkbox" name="fillBlanksOnly"> Same patient in room: only fill blanks</label>
       </div>
       <p class="status" role="status"></p>
@@ -220,21 +233,46 @@
     }
 
     const LEVEL_TEXT = { hold: 'Hold', flag: 'Flag', check: 'Check' };
-    function labsRow(r) {
-      if (!settings.labs) return '';
-      const L = state.labs.get(r.acct);
-      if (!L) return '';
-      if (L.error) return `<tr class="cz-labrow"><td colspan="13"><div class="cz-labs"><span class="cz-muted">Labs: couldn't load (${esc(L.error)})</span></div></td></tr>`;
-      const { list } = LABS.summarize(L.flags);
+    // WBC < 5.0 becomes a hold with a fever in the last 24 h (or drops off without one).
+    const labFlags = L => (L?.flags ? LABS.applyFever(L.flags, settings.vitals && L.vitals ? L.vitals.fever24 : null) : null);
+
+    function labsLine(L) {
+      if (!settings.labs || !L) return '';
+      if (L.error) return `<div class="cz-labs"><span class="cz-labhd">Labs</span><span class="cz-muted">couldn't load (${esc(L.error)})</span></div>`;
+      const { list } = LABS.summarize(labFlags(L) || []);
       if (!list.length) return '';
       const chips = list.map(f => {
         const cls = 'lv-' + (f.latest ? f.level : 'past');
         const tip = `${f.lab} ${f.value} on ${f.date}: ${f.reason}${f.latest ? '' : ' (not the most recent result)'}`;
         return `<span class="cz-lab ${cls}" title="${esc(tip)}"><b>${esc(f.label)}</b> ${esc(f.value)} <span class="cz-labdt">${esc(f.mmdd)}</span>${f.latest ? ` <i>${LEVEL_TEXT[f.level]}</i>` : ''}</span>`;
       }).join('');
-      return `<tr class="cz-labrow"><td colspan="13"><div class="cz-labs"><span class="cz-labhd">Critical labs</span>${chips}</div></td></tr>`;
+      return `<div class="cz-labs"><span class="cz-labhd">Critical labs</span>${chips}</div>`;
     }
-    const labHold = r => { const L = state.labs.get(r.acct); return !!L?.flags && L.flags.some(f => f.latest && f.level === 'hold'); };
+
+    function vitalsLine(L) {
+      if (!settings.vitals || !L) return '';
+      if (L.vitalsError) return `<div class="cz-labs"><span class="cz-labhd">Vitals</span><span class="cz-muted">couldn't load (${esc(L.vitalsError)})</span></div>`;
+      const v = L.vitals; if (!v) return '';
+      const keys = VIT.ORDER.filter(k => v.latest[k]);
+      if (!keys.length) return `<div class="cz-labs"><span class="cz-labhd">Vitals</span><span class="cz-muted">none charted in the last ${VIT.LOOKBACK_DAYS} days</span></div>`;
+      const latest = keys.map(k => {
+        const x = v.latest[k], ab = x.abnormal.length > 0;
+        return `<span class="cz-lab ${ab ? 'lv-hold' : 'lv-ok'}" title="${esc(`${x.label} ${x.value} at ${x.stamp}${ab ? ': ' + x.abnormal.join(', ') : ''}`)}"><b>${esc(x.label)}</b> ${esc(x.value)} <span class="cz-labdt">${esc(x.stamp)}</span></span>`;
+      }).join('');
+      const groups = VIT.groupAbnormal(v.abnormal).map(g => {
+        const tip = g.items.map(a => `${a.stamp}  ${a.display}`).join('\n');
+        return `<span class="cz-lab lv-flag" title="${esc(g.reason + '\n' + tip)}"><b>${esc(g.reason)}</b> ${esc(g.worst.display)} <span class="cz-labdt">${esc(g.worst.stamp)}</span>${g.count > 1 ? ` <i>×${g.count}</i>` : ''}</span>`;
+      }).join('');
+      return `<div class="cz-labs"><span class="cz-labhd">Vitals</span>${latest}${groups ? `<span class="cz-break"></span><span class="cz-labhd">Last 24 h</span>${groups}` : ''}</div>`;
+    }
+
+    function labsRow(r) {
+      const L = state.labs.get(r.acct);
+      const body = vitalsLine(L) + labsLine(L);
+      return body ? `<tr class="cz-labrow"><td colspan="13">${body}</td></tr>` : '';
+    }
+    const labHold = r => { const f = labFlags(state.labs.get(r.acct)); return !!f && f.some(x => x.latest && x.level === 'hold'); };
+    const vitalsAbn = r => (state.labs.get(r.acct)?.vitals?.abnormal.length || 0) > 0;
 
     function render() {
       const all = state.patients;
@@ -249,7 +287,9 @@
         ['OT caseload', all.filter(r => r.OT.caseload === 'Yes').length],
         ['ST caseload', all.filter(r => r.ST.caseload === 'Yes').length],
         ['FMP', all.filter(r => r.fmpPT === 'Yes' || r.fmpOT === 'Yes').length],
-        ...(settings.labs ? [[state.labsBusy ? `Lab hold (checked ${state.labs.size}/${all.length})` : 'Lab hold', all.filter(labHold).length]] : []),
+        ...(settings.labs ? [['Lab hold', all.filter(labHold).length]] : []),
+        ...(settings.vitals ? [['Abnormal vitals 24h', all.filter(vitalsAbn).length]] : []),
+        ...(state.labsBusy ? [['Checked', `${state.labs.size}/${all.length}`]] : []),
         [`D/C last ${settings.dcDays}d`, state.discharges.length],
       ].map(([l, n]) => `<div class="cz-stat"><b>${n}</b><span>${esc(l)}</span></div>`).join('');
 
@@ -306,18 +346,18 @@
     async function refreshLabs() {
       const gen = ++state.labGen;
       state.labs = new Map();
-      if (!settings.labs || !state.loaded) { state.labsBusy = false; render(); return; }
+      if ((!settings.labs && !settings.vitals) || !state.loaded) { state.labsBusy = false; render(); return; }
       state.labsBusy = true;
       render();
       let pending = 0;
       try {
-        await loadLabs(state.patients, state.facility, (acct, result) => {
+        await loadDetails(state.patients, state.facility, { labs: settings.labs, vitals: settings.vitals }, (acct, result) => {
           if (gen !== state.labGen) return;
           state.labs.set(acct, result);
           if (!pending) pending = requestAnimationFrame(() => { pending = 0; render(); });
         }, () => gen === state.labGen);
       } catch (e) {
-        if (gen === state.labGen) setStatus('Labs: ' + e.message, true);
+        if (gen === state.labGen) setStatus('Labs/vitals: ' + e.message, true);
       } finally {
         if (gen === state.labGen) { state.labsBusy = false; render(); }
       }
@@ -343,8 +383,8 @@
         saveSettings();
         if (state.loaded) refresh();
       }
-      if (e.target.name === 'labs') {
-        settings.labs = e.target.checked;
+      if (e.target.name === 'labs' || e.target.name === 'vitals') {
+        settings[e.target.name] = e.target.checked;
         saveSettings();
         refreshLabs();
       }
@@ -370,8 +410,15 @@
       if (!a) return;
       if (!state.loaded) { setStatus('Nothing loaded yet. Click Refresh first.', true); return; }
       if (a === 'csv') {
-        const labCol = ['Critical Labs', r => { const L = state.labs.get(r.acct); return L?.flags ? LABS.csvText(L.flags) : L?.error ? 'Could not load' : ''; }];
-        download(`census_${stamp()}.csv`, WS.toCsv(visiblePatients(), settings.labs ? [...WS.CENSUS_COLUMNS, labCol] : WS.CENSUS_COLUMNS));
+        const get = r => state.labs.get(r.acct);
+        const extra = [
+          ...(settings.labs ? [['Critical Labs', r => { const L = get(r); return L?.flags ? LABS.csvText(labFlags(L)) : L?.error ? 'Could not load' : ''; }]] : []),
+          ...(settings.vitals ? [
+            ['Latest Vitals', r => { const L = get(r); return L?.vitals ? VIT.latestText(L.vitals) : L?.vitalsError ? 'Could not load' : ''; }],
+            ['Abnormal Vitals 24h', r => { const L = get(r); return L?.vitals ? VIT.abnormalText(L.vitals) : ''; }],
+          ] : []),
+        ];
+        download(`census_${stamp()}.csv`, WS.toCsv(visiblePatients(), [...WS.CENSUS_COLUMNS, ...extra]));
       }
       if (a === 'csvDc') download(`discharges_${stamp()}.csv`, WS.toCsv(state.discharges, WS.DISCHARGE_COLUMNS));
       if (a === 'schedFile') download(`wellsky_schedule_${stamp()}.txt`, schedText(), 'text/plain;charset=utf-8');
@@ -391,6 +438,7 @@
       $('[name=dcDays]').value = settings.dcDays;
       $('[name=fillBlanksOnly]').checked = settings.fillBlanksOnly;
       $('[name=labs]').checked = settings.labs;
+      $('[name=vitals]').checked = settings.vitals;
       view.querySelectorAll('[name=type]').forEach(cb => { cb.checked = settings.types.includes(cb.value); });
     });
 
