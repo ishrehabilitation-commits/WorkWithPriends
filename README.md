@@ -55,7 +55,20 @@ picker in the header applies to every tab.
   WBC under 5.0 becomes a lab **Hold** when there's a fever in the last 24
   hours, drops off when temperatures were charted with no fever, and stays
   **Check** when no temperature was charted. The CSV gets **Latest Vitals** and
-  **Abnormal Vitals 24h** columns. Tests: `node --test modules/census/test/*.test.js`.
+  **Abnormal Vitals 24h** columns.
+  With **Orders 48h** ticked (the default), the row also lists X-ray, Arterial
+  Blood Gas, restraint (Q2H Restraint Check, Restraint Placement) and venous
+  doppler (VENOUS UPPER/LOWER) orders placed in the last 48 hours, with time
+  and status (discontinued ones in grey). They're matched on the order name,
+  not its free-text description (which often says "intravenously"). Watch list:
+  `modules/census/concern-orders.js`.
+  The count tiles are filters (green = on). **LTAC**, **IRF** and
+  **Geri-Psych** show or hide that type. **PT/OT/ST caseload**, **Needs eval**
+  and **No therapy** (not on any caseload, no eval needed) are combined with
+  OR: a patient shows if any green tile in that group fits. **FMP**, **Lab
+  hold**, **Abnormal vitals 24h** and **Orders 48h** start off; turning one on
+  shows only patients that fit it (and every other one that's on). **Census**
+  resets everything, and **D/C** jumps to the discharges. Tests: `node --test modules/census/test/*.test.js`.
 
 Nothing is stored outside the browser. All tabs call WellSky with the session
 you are already signed in with.

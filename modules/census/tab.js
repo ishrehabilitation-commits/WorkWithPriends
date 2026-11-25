@@ -12,8 +12,12 @@
   const WS = window.WWPCensus;
   const LABS = window.WWPLabs;
   const VIT = window.WWPVitals;
+  const CORD = window.WWPConcernOrders;
   const TYPES = [['LTCH', 'LTAC'], ['Rehab', 'IRF'], ['BHS', 'Geri-Psych'], ['Other', 'Other']];
   const DISC = ['PT', 'OT', 'ST'];
+  // Clickable count tiles. Therapy tiles are OR'd (a patient shows if any active one matches);
+  // focus tiles are AND'd (each active one must match).
+  const THERAPY_ALL = ['PT', 'OT', 'ST', 'need', 'none'];
 
   // ------------------------------------------------------------------ //
   //  WellSky session and requests                                       //
@@ -124,6 +128,11 @@
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return VIT.evaluate(VIT.parseVitals(res.text));
     }
+    async function orders(p) {
+      const res = await json(CORD.ORDERS_URL, CORD.buildOrdersBody({ userId, token, facility: fac, account: p.acct }));
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return CORD.evaluate(CORD.parseOrders(res.text));
+    }
     async function labs(p) {
       const ids = { userId, token, facility: fac, account: p.acct, mrn: p.mrn };
       const cat = await json(LABS.CATEGORIES_URL, LABS.buildCategoriesBody(ids));
@@ -142,6 +151,7 @@
         await Promise.all([
           want.labs && labs(p).then(f => { out.flags = f; }, e => { out.error = e.message; }),
           want.vitals && vitals(p).then(v => { out.vitals = v; }, e => { out.vitalsError = e.message; }),
+          want.orders && orders(p).then(o => { out.orders = o; }, e => { out.ordersError = e.message; }),
         ]);
         onResult(p.acct, out);
       }
@@ -157,9 +167,9 @@
 
   function init(view, ctx) {
     const { esc } = ctx;
-    const settings = { dcDays: 7, types: TYPES.map(([k]) => k), fillBlanksOnly: true, labs: true, vitals: true };
+    const settings = { dcDays: 7, types: TYPES.map(([k]) => k), fillBlanksOnly: true, labs: true, vitals: true, orders: true };
     const state = { patients: [], discharges: [], sort: { key: 'room', dir: 1 }, loaded: false, busy: false, facility: null,
-      labs: new Map(), labGen: 0, labsBusy: false };
+      labs: new Map(), labGen: 0, labsBusy: false, therapy: new Set(THERAPY_ALL), focus: new Set() };
 
     view.classList.add('census');
     view.innerHTML = `
@@ -176,6 +186,7 @@
         <button type="button" data-a="schedFile" title="Same data as a file, if the clipboard doesn't work">Schedule file</button>
         <label class="disch" title="Pull each patient's labs since admit and flag critical values"><input type="checkbox" name="labs"> Critical labs</label>
         <label class="disch" title="Latest vitals and any abnormal readings in the last 24 hours"><input type="checkbox" name="vitals"> Vitals</label>
+        <label class="disch" title="X-ray, ABG, restraint and venous doppler orders placed in the last 48 hours"><input type="checkbox" name="orders"> Orders 48h</label>
         <label class="disch" title="When the schedule already has this patient in the room, the Excel macro only fills empty cells (like a missing eval or admit date) and changes nothing else."><input type="checkbox" name="fillBlanksOnly"> Same patient in room: only fill blanks</label>
       </div>
       <p class="status" role="status"></p>
@@ -211,6 +222,8 @@
       const val = r => ({ room: r.room, name: r.name, type: r.type, admit: Number(r.admitDate), physician: r.physician, team: r.team ?? 0 })[key];
       return state.patients
         .filter(r => settings.types.includes(r.type))
+        .filter(therapyMatch)
+        .filter(r => [...state.focus].every(f => FOCUS[f](r)))
         .filter(r => !q || [r.name, r.room, r.acct, r.mrn, r.physician, r.caseManager].join(' ').toLowerCase().includes(q))
         .sort((a, b) => { const x = val(a), y = val(b); return (x > y ? 1 : x < y ? -1 : 0) * dir || a.room.localeCompare(b.room); });
     }
@@ -266,13 +279,59 @@
       return `<div class="cz-labs"><span class="cz-labhd">Vitals</span>${latest}${groups ? `<span class="cz-break"></span><span class="cz-labhd">Last 24 h</span>${groups}` : ''}</div>`;
     }
 
+    function ordersLine(L) {
+      if (!settings.orders || !L) return '';
+      if (L.ordersError) return `<div class="cz-labs"><span class="cz-labhd">Orders 48h</span><span class="cz-muted">couldn't load (${esc(L.ordersError)})</span></div>`;
+      if (!L.orders?.length) return '';
+      const chips = L.orders.map(o => `<span class="cz-lab ${o.stopped ? 'lv-past' : 'lv-order'}" title="${esc(`${o.detail}\nOrdered ${o.stamp} by ${o.by}\n${o.status}`)}"><b>${esc(o.label)}</b> ${esc(o.name)} <span class="cz-labdt">${esc(o.stamp)}${o.status ? ' · ' + esc(o.status.replace(/:.*/, '')) : ''}</span></span>`).join('');
+      return `<div class="cz-labs"><span class="cz-labhd">Orders 48h</span>${chips}</div>`;
+    }
+
     function labsRow(r) {
       const L = state.labs.get(r.acct);
-      const body = vitalsLine(L) + labsLine(L);
+      const body = vitalsLine(L) + labsLine(L) + ordersLine(L);
       return body ? `<tr class="cz-labrow"><td colspan="13">${body}</td></tr>` : '';
     }
     const labHold = r => { const f = labFlags(state.labs.get(r.acct)); return !!f && f.some(x => x.latest && x.level === 'hold'); };
+    const hasOrders = r => (state.labs.get(r.acct)?.orders?.length || 0) > 0;
     const vitalsAbn = r => (state.labs.get(r.acct)?.vitals?.abnormal.length || 0) > 0;
+
+    const onCaseload = r => DISC.some(d => r[d].caseload === 'Yes');
+    const anyNeedsEval = r => DISC.some(d => needsEval(r, d));
+    const THERAPY = {
+      PT: r => r.PT.caseload === 'Yes', OT: r => r.OT.caseload === 'Yes', ST: r => r.ST.caseload === 'Yes',
+      need: anyNeedsEval, none: r => !onCaseload(r) && !anyNeedsEval(r),
+    };
+    const FOCUS = {
+      fmp: r => r.fmpPT === 'Yes' || r.fmpOT === 'Yes', labHold: r => labHold(r), vitals: r => vitalsAbn(r), orders: r => hasOrders(r),
+    };
+    function therapyMatch(r) {
+      if (state.therapy.size === THERAPY_ALL.length) return true;
+      return [...state.therapy].some(k => THERAPY[k](r));
+    }
+    function resetFilters() {
+      settings.types = TYPES.map(([k]) => k);
+      state.therapy = new Set(THERAPY_ALL);
+      state.focus = new Set();
+      $('[name=search]').value = '';
+      view.querySelectorAll('[name=type]').forEach(cb => { cb.checked = true; });
+      saveSettings();
+    }
+    function toggleTile(f) {
+      const [kind, key] = f.split(':');
+      if (kind === 'reset') resetFilters();
+      if (kind === 'type') {
+        const t = new Set(settings.types);
+        t.has(key) ? t.delete(key) : t.add(key);
+        settings.types = TYPES.map(([k]) => k).filter(k => t.has(k));
+        view.querySelectorAll('[name=type]').forEach(cb => { cb.checked = t.has(cb.value); });
+        saveSettings();
+      }
+      if (kind === 'therapy') state.therapy.has(key) ? state.therapy.delete(key) : state.therapy.add(key);
+      if (kind === 'focus') state.focus.has(key) ? state.focus.delete(key) : state.focus.add(key);
+      if (kind === 'dc') { $('.cz-dctitle').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+      render();
+    }
 
     function render() {
       const all = state.patients;
@@ -280,18 +339,28 @@
       ctx.setCount(all.filter(r => settings.types.includes(r.type) && DISC.some(d => needsEval(r, d))).length);
       if (!state.loaded) return;
 
-      $('.cz-stats').innerHTML = [
-        ['Census', all.length], ['LTAC', count('LTCH')], ['IRF', count('Rehab')], ['Geri-Psych', count('BHS')],
-        ['Needs eval', all.filter(r => settings.types.includes(r.type) && DISC.some(d => needsEval(r, d))).length],
-        ['PT caseload', all.filter(r => r.PT.caseload === 'Yes').length],
-        ['OT caseload', all.filter(r => r.OT.caseload === 'Yes').length],
-        ['ST caseload', all.filter(r => r.ST.caseload === 'Yes').length],
-        ['FMP', all.filter(r => r.fmpPT === 'Yes' || r.fmpOT === 'Yes').length],
-        ...(settings.labs ? [['Lab hold', all.filter(labHold).length]] : []),
-        ...(settings.vitals ? [['Abnormal vitals 24h', all.filter(vitalsAbn).length]] : []),
-        ...(state.labsBusy ? [['Checked', `${state.labs.size}/${all.length}`]] : []),
-        [`D/C last ${settings.dcDays}d`, state.discharges.length],
-      ].map(([l, n]) => `<div class="cz-stat"><b>${n}</b><span>${esc(l)}</span></div>`).join('');
+      const inType = all.filter(r => settings.types.includes(r.type));
+      const n = fn => inType.filter(fn).length;
+      // [label, count, filter id, active?]  – active tiles are green; a group of tiles is separated by a gap.
+      const groups = [
+        [['Census', all.length, 'reset:', false, 'Show everyone again (clears all tile filters and search)']],
+        [['LTAC', count('LTCH'), 'type:LTCH'], ['IRF', count('Rehab'), 'type:Rehab'], ['Geri-Psych', count('BHS'), 'type:BHS']]
+          .map(([l, c, f]) => [l, c, f, settings.types.includes(f.split(':')[1]), `Show or hide ${l} patients`]),
+        [['PT caseload', n(THERAPY.PT), 'therapy:PT'], ['OT caseload', n(THERAPY.OT), 'therapy:OT'], ['ST caseload', n(THERAPY.ST), 'therapy:ST'],
+          ['Needs eval', n(THERAPY.need), 'therapy:need'], ['No therapy', n(THERAPY.none), 'therapy:none']]
+          .map(([l, c, f]) => [l, c, f, state.therapy.has(f.split(':')[1]), 'Show patients on any green tile in this group']),
+        [['FMP', n(FOCUS.fmp), 'focus:fmp'],
+          ...(settings.labs ? [['Lab hold', n(FOCUS.labHold), 'focus:labHold']] : []),
+          ...(settings.vitals ? [['Abnormal vitals 24h', n(FOCUS.vitals), 'focus:vitals']] : []),
+          ...(settings.orders ? [['Orders 48h', n(FOCUS.orders), 'focus:orders']] : [])]
+          .map(([l, c, f]) => [l, c, f, state.focus.has(f.split(':')[1]), 'Click to show only these patients (combines with other green tiles here)']),
+        [...(state.labsBusy ? [['Checked', `${state.labs.size}/${all.length}`, '', false, '']] : []),
+          [`D/C last ${settings.dcDays}d`, state.discharges.length, 'dc:', false, 'Jump to recent discharges']],
+      ];
+      $('.cz-stats').innerHTML = groups.filter(g => g.length).map(g => `<div class="cz-statgrp">${g.map(([l, c, f, on, tip]) =>
+        `<div class="cz-stat${f ? ' click' : ''}${on ? ' on' : ''}"${f ? ` role="button" tabindex="0" data-f="${esc(f)}" aria-pressed="${on}"` : ''} title="${esc(tip)}"><b>${c}</b><span>${esc(l)}</span></div>`).join('')}</div>`).join('');
+      const filtered = state.therapy.size !== THERAPY_ALL.length || state.focus.size > 0 || settings.types.length !== TYPES.length;
+      $('.cz-stats').classList.toggle('filtered', filtered);
 
       $('.cz-census tbody').innerHTML = visiblePatients().map(r => { const lr = labsRow(r); return `
         <tr class="t-${r.type}${lr ? ' has-labs' : ''}">
@@ -346,12 +415,12 @@
     async function refreshLabs() {
       const gen = ++state.labGen;
       state.labs = new Map();
-      if ((!settings.labs && !settings.vitals) || !state.loaded) { state.labsBusy = false; render(); return; }
+      if ((!settings.labs && !settings.vitals && !settings.orders) || !state.loaded) { state.labsBusy = false; render(); return; }
       state.labsBusy = true;
       render();
       let pending = 0;
       try {
-        await loadDetails(state.patients, state.facility, { labs: settings.labs, vitals: settings.vitals }, (acct, result) => {
+        await loadDetails(state.patients, state.facility, { labs: settings.labs, vitals: settings.vitals, orders: settings.orders }, (acct, result) => {
           if (gen !== state.labGen) return;
           state.labs.set(acct, result);
           if (!pending) pending = requestAnimationFrame(() => { pending = 0; render(); });
@@ -383,7 +452,7 @@
         saveSettings();
         if (state.loaded) refresh();
       }
-      if (e.target.name === 'labs' || e.target.name === 'vitals') {
+      if (['labs', 'vitals', 'orders'].includes(e.target.name)) {
         settings[e.target.name] = e.target.checked;
         saveSettings();
         refreshLabs();
@@ -398,7 +467,13 @@
         render();
       }
     });
+    view.addEventListener('keydown', e => {
+      const tile = e.target.closest?.('.cz-stat[data-f]');
+      if (tile && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggleTile(tile.dataset.f); }
+    });
     view.addEventListener('click', async e => {
+      const tile = e.target.closest('.cz-stat[data-f]');
+      if (tile) { toggleTile(tile.dataset.f); return; }
       const th = e.target.closest('.cz-census th[data-key]');
       if (th) {
         const k = th.dataset.key;
@@ -417,6 +492,7 @@
             ['Latest Vitals', r => { const L = get(r); return L?.vitals ? VIT.latestText(L.vitals) : L?.vitalsError ? 'Could not load' : ''; }],
             ['Abnormal Vitals 24h', r => { const L = get(r); return L?.vitals ? VIT.abnormalText(L.vitals) : ''; }],
           ] : []),
+          ...(settings.orders ? [['Orders 48h', r => { const L = get(r); return L?.orders ? CORD.csvText(L.orders) : L?.ordersError ? 'Could not load' : ''; }]] : []),
         ];
         download(`census_${stamp()}.csv`, WS.toCsv(visiblePatients(), [...WS.CENSUS_COLUMNS, ...extra]));
       }
@@ -439,6 +515,7 @@
       $('[name=fillBlanksOnly]').checked = settings.fillBlanksOnly;
       $('[name=labs]').checked = settings.labs;
       $('[name=vitals]').checked = settings.vitals;
+      $('[name=orders]').checked = settings.orders;
       view.querySelectorAll('[name=type]').forEach(cb => { cb.checked = settings.types.includes(cb.value); });
     });
 
