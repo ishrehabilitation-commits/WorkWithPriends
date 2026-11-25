@@ -33,6 +33,18 @@ picker in the header applies to every tab.
   screen. **Copy for Schedule** (or **Schedule file**) feeds the Excel macro in
   `modules/census/excel/` that fills the therapy schedule workbook. Ported from
   the WellSky Rehab Census extension v0.3.0.
+  With **Critical labs** ticked (the default), each patient's labs since admit
+  are pulled after the census loads, and a row under the patient lists the
+  newest critical value of each lab with its date: **Hold** (red), **Flag**
+  (orange) or **Check** (yellow, WBC under 5.0 until vitals are added). A
+  critical value that is no longer the latest result shows in grey. The **Lab
+  hold** tile counts patients whose latest result is a hold, and the census CSV
+  gets a **Critical Labs** column. Criteria are in `modules/census/labs.js`:
+  Hgb < 7 hold, < 8 flag; Na < 125 or > 155; K <= 3.0 or >= 6.0; WBC < 2.5 or
+  > 30; platelets < 5,000 hold (no ambulation), < 20,000 flag (room treat;
+  WellSky reports K/µL, so 18 means 18,000); glucose < 70 or > 300; PCO2 > 60
+  with pH < 7.30 in the same draw; PO2 < 55; C diff, Flu A/B, SARS CoV-2 and
+  RSV positive unless the result says Negative or Not Detected (TNP skipped).
 
 Nothing is stored outside the browser. All tabs call WellSky with the session
 you are already signed in with.
