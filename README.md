@@ -33,6 +33,29 @@ picker in the header applies to every tab.
   screen. **Copy for Schedule** (or **Schedule file**) feeds the Excel macro in
   `modules/census/excel/` that fills the therapy schedule workbook. Ported from
   the WellSky Rehab Census extension v0.3.0.
+  With **Critical labs** ticked (the default), each patient's labs since admit
+  are pulled after the census loads, and a row under the patient lists the
+  newest critical value of each lab with its date: **Hold** (red), **Flag**
+  (orange) or **Check** (yellow, WBC under 5.0 until vitals are added). A
+  critical value that is no longer the latest result shows in grey. The **Lab
+  hold** tile counts patients whose latest result is a hold, and the census CSV
+  gets a **Critical Labs** column. Criteria are in `modules/census/labs.js`:
+  Hgb < 7 hold, < 8 flag; Na < 125 or > 155; K <= 3.0 or >= 6.0; WBC < 2.5 or
+  > 30; platelets < 5,000 hold (no ambulation), < 20,000 flag (room treat;
+  WellSky reports K/µL, so 18 means 18,000); glucose < 70 or > 300; PCO2 > 60
+  with pH < 7.30 in the same draw; PO2 < 55; C diff, Flu A/B, SARS CoV-2 and
+  RSV positive unless the result says Negative or Not Detected (TNP skipped).
+  With **Vitals** ticked (the default), the same row shows each patient's latest
+  BP, SpO2, temperature, pulse, pain, MAP and glucose with mm/dd and time (from
+  the last 7 days), red when abnormal, and a **Last 24 h** line grouping every
+  abnormal reading with its worst value and count: pulse <= 50 or >= 120, SBP
+  <= 90 or >= 180, DBP <= 40 or >= 100, SpO2 < 90%, temp >= 100.4, any pain
+  above 0 (Refused/Unable isn't flagged), glucose < 70 or > 300. MAP is shown
+  but not flagged. Readings charted as mistakes or duplicates are ignored. A
+  WBC under 5.0 becomes a lab **Hold** when there's a fever in the last 24
+  hours, drops off when temperatures were charted with no fever, and stays
+  **Check** when no temperature was charted. The CSV gets **Latest Vitals** and
+  **Abnormal Vitals 24h** columns. Tests: `node --test modules/census/test/*.test.js`.
 
 Nothing is stored outside the browser. All tabs call WellSky with the session
 you are already signed in with.
