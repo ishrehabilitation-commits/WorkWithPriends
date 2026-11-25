@@ -284,6 +284,7 @@ td.tot { font-weight: 600; border-left: 1px solid var(--line); }
 .census .cz-lab.lv-flag { background: #fdf3e2; color: var(--behind); }
 .census .cz-lab.lv-check { background: #fff8d6; color: #7a5b00; }
 .census .cz-lab.lv-past { text-decoration: none; opacity: .85; }
+.census .cz-lab.lv-order { background: #e8effa; color: #1e4f91; }
 .census .cz-lab.lv-ok { background: #f2f5f8; color: var(--ink); }
 .census .cz-labs + .cz-labs { margin-top: 3px; }
 .census .cz-labhd { min-width: 5.5em; }
