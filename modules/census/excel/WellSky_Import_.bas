@@ -13,7 +13,8 @@ Option Explicit
 ' With "Same patient in room: only fill blanks" ticked in the Census tab, a row
 ' that already has the same patient only gets its empty cells filled.
 '
-' After a clean update it runs Run_All_Macros, then lays out the Team 1-3
+' After a clean update it undoes last run's Team sheet layout, runs
+' Run_All_Macros (which clears and refills Team 1-3 in place), then lays out the Team 1-3
 ' sheets: Precautions/Diagnosis split into D:E, each patient on two half-height
 ' rows, and a second line with Vitals (D) and CRIT labs (E) from WellSky.
 '**************************************************************************
@@ -194,6 +195,23 @@ End Sub
 Private Function FinishSchedule(data As Object) As String
     Dim sheetList As Variant, i As Long, ws As Worksheet, out As String, n As Long
 
+    ' Run_All_Macros clears and refills the Team sheets in place, so last run's extra
+    ' column and rows have to go first or its rows would land one column off.
+    sheetList = Split(TEAM_SHEETS, ",")
+    For i = 0 To UBound(sheetList)
+        Set ws = Nothing
+        On Error Resume Next
+        Set ws = ThisWorkbook.Worksheets(sheetList(i))
+        On Error GoTo 0
+        If Not ws Is Nothing Then
+            If Not UndoTeamLayout(ws) Then
+                FinishSchedule = vbLf & vbLf & "Couldn't undo the old layout on " & sheetList(i) & ": " & layoutError & _
+                                 vbLf & "Run_All_Macros was not run."
+                Exit Function
+            End If
+        End If
+    Next i
+
     On Error Resume Next
     Application.Run "'" & ThisWorkbook.Name & "'!Run_All_Macros"
     If Err.Number <> 0 Then
@@ -203,7 +221,6 @@ Private Function FinishSchedule(data As Object) As String
     End If
     On Error GoTo 0
 
-    sheetList = Split(TEAM_SHEETS, ",")
     For i = 0 To UBound(sheetList)
         Set ws = Nothing
         On Error Resume Next
@@ -294,6 +311,57 @@ Fail:
     Application.DisplayAlerts = alerts
     If wasProtected Then ws.Protect
     LayoutTeamSheet = -2
+End Function
+
+' Puts a Team sheet back the way Run_All_Macros expects it: removes each patient's
+' second (vitals) row, restores the row height, and removes column E. Deleting whole
+' rows and columns shrinks the merges with them. Does nothing if the sheet isn't laid out.
+Private Function UndoTeamLayout(ws As Worksheet) As Boolean
+    Dim hdr As Long, endRow As Long, r As Long, h As Double, w As Double
+    Dim wasProtected As Boolean, alerts As Boolean
+
+    For r = 1 To MAX_ROW
+        If IsPatientHeader(ws, r) Then hdr = r: Exit For
+    Next r
+    UndoTeamLayout = True
+    If hdr = 0 Then Exit Function
+    If ws.Cells(hdr, "D").MergeArea.Columns.Count < 2 Then Exit Function
+
+    alerts = Application.DisplayAlerts
+    On Error GoTo Fail
+    wasProtected = ws.ProtectContents
+    If wasProtected Then ws.Unprotect
+    Application.DisplayAlerts = False
+
+    ' Only the patient rows: up to the repeated "Patient" header, or the first empty name.
+    For r = hdr + 1 To hdr + 2 * MAX_ROW
+        If IsPatientHeader(ws, r) Then Exit For
+        If Len(Trim$(ws.Cells(r, "A").Value & "")) = 0 And Not ws.Cells(r, "A").MergeCells Then Exit For
+    Next r
+    endRow = r
+
+    ' A vitals row is the lower half of a two-row merge in column A.
+    For r = endRow - 1 To hdr + 2 Step -1
+        If ws.Cells(r, "A").MergeArea.Row = r - 1 And ws.Cells(r, "A").MergeArea.Rows.Count = 2 Then
+            h = ws.Rows(r - 1).RowHeight + ws.Rows(r).RowHeight
+            ws.Rows(r).Delete
+            ws.Rows(r - 1).RowHeight = h
+        End If
+    Next r
+
+    w = ws.Columns("D").ColumnWidth + ws.Columns("E").ColumnWidth
+    ws.Columns("E").Delete
+    ws.Columns("D").ColumnWidth = w
+
+    Application.DisplayAlerts = alerts
+    If wasProtected Then ws.Protect
+    Exit Function
+
+Fail:
+    layoutError = Err.Description
+    Application.DisplayAlerts = alerts
+    If wasProtected Then ws.Protect
+    UndoTeamLayout = False
 End Function
 
 Private Function IsPatientHeader(ws As Worksheet, ByVal r As Long) As Boolean
