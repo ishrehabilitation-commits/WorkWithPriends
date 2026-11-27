@@ -440,7 +440,16 @@
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     }
     const stamp = () => `${state.facility}_${WS.ymd(new Date())}`;
-    const schedText = () => WS.scheduleTsv(state.patients, state.facility, new Date(), { fillBlanksOnly: settings.fillBlanksOnly });
+    const schedExtras = acct => {
+      const L = state.labs.get(acct);
+      const flags = labFlags(L);
+      return {
+        vitals: settings.vitals && L?.vitals ? WS.scheduleVitals(L.vitals) : '',
+        crits: flags ? WS.scheduleCrits(LABS.summarize(flags).list) : '',
+      };
+    };
+    const schedText = () => WS.scheduleTsv(state.patients, state.facility, new Date(),
+      { fillBlanksOnly: settings.fillBlanksOnly, extras: schedExtras });
 
     const saveSettings = () => chrome.storage.sync.set({ census: settings });
     view.addEventListener('submit', e => { e.preventDefault(); refresh(); });
@@ -501,7 +510,8 @@
       if (a === 'sched') {
         try {
           await navigator.clipboard.writeText(schedText());
-          setStatus(`Copied ${state.patients.length} patients. In Excel run UpdateFromWellSky (Alt+F8).`);
+          setStatus(`Copied ${state.patients.length} patients. In Excel run UpdateFromWellSky (Alt+F8).`
+            + (state.labsBusy ? ' Vitals and labs are still loading, so some Team sheet lines will be blank; copy again when they finish.' : ''), state.labsBusy);
         } catch {
           setStatus('The clipboard is blocked here. Use "Schedule file" instead.', true);
         }
