@@ -404,11 +404,36 @@
       P: evals.length ? mmdd(Math.min(...evals)) : '',
     };
   }
-  const SCHEDULE_COLS = ['room', 'A', 'C', 'F', 'G', 'H', 'I', 'J', 'K', 'M', 'N', 'P', 'acct'];
+  /* Vitals line for the Team sheets: BP, SpO2 and HR always (when charted); Pain, MAP and
+   * Temp only when out of range. v = WWPVitals.evaluate() result.
+   * "BP:106/42, SpO2:97%, HR:65, Pain 3" */
+  const MAP_RANGE = [65, 110];
+  const TEMP_RANGE = [96.8, 100.4];
+  function scheduleVitals(v) {
+    const L = v?.latest; if (!L) return '';
+    const out = [];
+    if (L.bp) out.push(`BP:${L.bp.value}`);
+    if (L.oxygen) out.push(`SpO2:${L.oxygen.value}`);
+    if (L.pulse) out.push(`HR:${L.pulse.value}`);
+    if (L.pain && L.pain.abnormal.length) out.push(`Pain ${L.pain.value}`);
+    const map = L.map && Number(L.map.value);
+    if (map && (map < MAP_RANGE[0] || map > MAP_RANGE[1])) out.push(`MAP:${L.map.value}`);
+    const temp = L.temp && parseFloat(L.temp.value);
+    if (temp && (temp < TEMP_RANGE[0] || temp >= TEMP_RANGE[1])) out.push(`Temp:${String(L.temp.value).replace('°', '')}`);
+    return out.join(', ');
+  }
+  /* Critical labs line: the newest value of each lab that is critical on its latest result.
+   * list = WWPLabs.summarize(...).list.  "Glu 62, Hgb 7.1" */
+  function scheduleCrits(list) {
+    return (list || []).filter(f => f.latest && f.level !== 'check').map(f => `${f.label} ${f.value}`).join(', ');
+  }
+
+  const SCHEDULE_COLS = ['room', 'A', 'C', 'F', 'G', 'H', 'I', 'J', 'K', 'M', 'N', 'P', 'acct', 'vitals', 'crits'];
   // opts.fillBlanksOnly: when the room already has this patient, the macro only fills empty cells.
+  // opts.extras(acct) -> { vitals, crits } text for the Team sheets (from the per-patient details).
   function scheduleTsv(patients, facility, now = new Date(), opts = {}) {
     const esc = v => String(v ?? '').replace(/\\/g, '\\\\').replace(/\t/g, ' ').replace(/\r?\n/g, '\\n');
-    const rows = patients.map(scheduleRow);
+    const rows = patients.map(p => ({ ...scheduleRow(p), ...(opts.extras ? opts.extras(p.acct) : {}) }));
     const flags = opts.fillBlanksOnly ? '\tfillBlanks=1' : '';
     return [`#WELLSKY-SCHEDULE\tv1\t${facility}\t${now.toISOString()}${flags}`, SCHEDULE_COLS.join('\t'),
       ...rows.map(r => SCHEDULE_COLS.map(c => esc(r[c])).join('\t'))].join('\r\n');
@@ -417,7 +442,7 @@
   const api = {
     RS, DATAHUB_URL, HXHFRPT_URL, ORDERS_URL, buildOrdersBody, buildConsultsBody, consultPhysiatrist, parseOrders, orderInfo, FACILITIES, EVAL_FORMS, HX_QUESTIONS, PATIENT_FIELDS, TYPE_LABEL,
     ymd, daysAgoYmd, fmtDate, daysBetween, buildDataHubBody, patientListQuery, evalFormQuery, parseDataHub,
-    buildHxBody, parseHx, parseFmp, scheduleRow, scheduleTsv, scheduleName, scheduleRoom, mergeData, typeKey, toCsv, CENSUS_COLUMNS, DISCHARGE_COLUMNS,
+    buildHxBody, parseHx, parseFmp, scheduleRow, scheduleTsv, scheduleVitals, scheduleCrits, scheduleName, scheduleRoom, mergeData, typeKey, toCsv, CENSUS_COLUMNS, DISCHARGE_COLUMNS,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.WWPCensus = api;

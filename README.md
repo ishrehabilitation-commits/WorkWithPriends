@@ -139,7 +139,16 @@ the helper in `updater/` and reloads the extension. To ship an update, bump
   has the same patient only gets its empty cells filled. Column C is the primary
   doctor's last name (first word before the comma), plus a second line only for
   a physiatrist (Gurwara), taken from the co-physician or a Physiatry Consult
-  order (CON019). Tests: `node --test modules/census/test/*.test.js`
+  order (CON019). After a clean update the macro runs the workbook's
+  `Run_All_Macros`, then lays out the **Team 1-3** sheets: column D is split into
+  D and E (half width each), each patient takes two half-height rows (A-C and F-Q
+  merged down, Precautions/Diagnosis across D:E on top), and the second row shows
+  ***Vitals:*** BP, SpO2 and HR (plus Pain, MAP or Temp when out of range) in D
+  and ***CRIT:*** labs in E. Vitals and crits come from the Census tab's Vitals and
+  Critical labs pulls, so let those finish before **Copy for Schedule**.
+  Because `Run_All_Macros` clears and refills the Team sheets in place, the macro
+  first undoes the previous layout (removes the vitals rows and column E).
+  Tests: `node --test modules/census/test/*.test.js`
   (made-up data only).
 - `background.js`: session cookies, the update check, the toolbar button and
   the LTRAX sync.

@@ -108,3 +108,25 @@ test('physiatry consult orders add the second doctor line', () => {
   }, now);
   assert.equal(WS.scheduleRow(patients[0]).C, 'Stuart\nGurwara');
 });
+
+test('Team sheet vitals and crits lines', () => {
+  const lat = (value, abnormal = []) => ({ value, abnormal });
+  assert.equal(WS.scheduleVitals({ latest: {
+    bp: lat('106/42'), oxygen: lat('97%'), pulse: lat('65'), pain: lat('3', ['Pain reported']), map: lat('80'), temp: lat('98.6°'),
+  } }), 'BP:106/42, SpO2:97%, HR:65, Pain 3');
+  assert.equal(WS.scheduleVitals({ latest: {
+    bp: lat('153/92'), oxygen: lat('92%'), pulse: lat('55'), pain: lat('0'), map: lat('45'), temp: lat('103°', ['Temp ≥ 100.4']),
+  } }), 'BP:153/92, SpO2:92%, HR:55, MAP:45, Temp:103');
+  assert.equal(WS.scheduleVitals(null), '');
+  assert.equal(WS.scheduleCrits([
+    { label: 'Glu', value: '62', latest: true, level: 'hold' },
+    { label: 'Hgb', value: '7.1', latest: true, level: 'flag' },
+    { label: 'WBC', value: '4.1', latest: true, level: 'check' },
+    { label: 'K', value: '2.9', latest: false, level: 'hold' },
+  ]), 'Glu 62, Hgb 7.1');
+  const { patients } = WS.mergeData({ current: [patient('1', 'SAMP00114A', 'LTCH')], evals: { PT: [], OT: [], ST: [] } }, now);
+  const lines = WS.scheduleTsv(patients, '204', now, { extras: () => ({ vitals: 'BP:1/1', crits: 'Glu 62' }) }).split('\r\n');
+  const cols = lines[1].split('\t'), row = lines[2].split('\t');
+  assert.equal(row[cols.indexOf('vitals')], 'BP:1/1');
+  assert.equal(row[cols.indexOf('crits')], 'Glu 62');
+});

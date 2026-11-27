@@ -12,10 +12,18 @@ Option Explicit
 ' Rows whose column D says DIALYSIS ROOM are never touched.
 ' With "Same patient in room: only fill blanks" ticked in the Census tab, a row
 ' that already has the same patient only gets its empty cells filled.
+'
+' After a clean update it undoes last run's Team sheet layout, runs
+' Run_All_Macros (which clears and refills Team 1-3 in place), then lays out the Team 1-3
+' sheets: Precautions/Diagnosis split into D:E, each patient on two half-height
+' rows, and a second line with Vitals (D) and CRIT labs (E) from WellSky.
 '**************************************************************************
 
 Private Const TAG As String = "#WELLSKY-SCHEDULE"
 Private Const MAX_ROW As Long = 200
+Private Const TEAM_SHEETS As String = "Team 1,Team 2,Team 3"
+Private Const LAST_TEAM_COL As Long = 17          ' Q, after the new column E
+Private layoutError As String
 
 Public Sub UpdateFromWellSky()
     Dim txt As String, lines() As String, hdr() As String, f() As String
@@ -28,7 +36,7 @@ Public Sub UpdateFromWellSky()
     Dim noRoom As String, notOnSheet As String, changedList As String, vacatedList As String
     Dim toReplace As Collection, toVacate As Collection, item As Variant
     Dim updated As Long, cleared As Long, filled As Long
-    Dim fillBlanks As Boolean, blankOnly As Boolean
+    Dim fillBlanks As Boolean, blankOnly As Boolean, finishMsg As String
 
     '--- 1. Get the export (clipboard first, then ask for the file) ---
     txt = ClipboardText()
@@ -173,13 +181,250 @@ CleanUp:
     Application.ScreenUpdating = True
     On Error GoTo 0
 
-    msg = errMsg & "Updated " & updated & " patient row(s)."
+    If errMsg = "" Then finishMsg = FinishSchedule(data)
+
+    msg = errMsg & "Updated " & updated & " patient row(s)." & finishMsg
     If changedList <> "" Then msg = msg & vbLf & vbLf & "New patient in these rooms:" & changedList
     If cleared > 0 Then msg = msg & vbLf & vbLf & "Cleared (not on the WellSky census):" & vacatedList
     If notOnSheet <> "" Then msg = msg & vbLf & vbLf & "Room not found on the schedule:" & notOnSheet
     If noRoom <> "" Then msg = msg & vbLf & vbLf & "No room assigned in WellSky:" & noRoom
     MsgBox msg, IIf(errMsg = "", vbInformation, vbExclamation), "WellSky update"
 End Sub
+
+'--- after the update: the workbook's own macros, then the Team sheet layout ---
+Private Function FinishSchedule(data As Object) As String
+    Dim sheetList As Variant, i As Long, ws As Worksheet, out As String, n As Long
+
+    ' Run_All_Macros clears and refills the Team sheets in place, so last run's extra
+    ' column and rows have to go first or its rows would land one column off.
+    sheetList = Split(TEAM_SHEETS, ",")
+    For i = 0 To UBound(sheetList)
+        Set ws = Nothing
+        On Error Resume Next
+        Set ws = ThisWorkbook.Worksheets(sheetList(i))
+        On Error GoTo 0
+        If Not ws Is Nothing Then
+            If Not UndoTeamLayout(ws) Then
+                FinishSchedule = vbLf & vbLf & "Couldn't undo the old layout on " & sheetList(i) & ": " & layoutError & _
+                                 vbLf & "Run_All_Macros was not run."
+                Exit Function
+            End If
+        End If
+    Next i
+
+    On Error Resume Next
+    Application.Run "'" & ThisWorkbook.Name & "'!Run_All_Macros"
+    If Err.Number <> 0 Then
+        FinishSchedule = vbLf & vbLf & "Run_All_Macros stopped: " & Err.Description & vbLf & "Team sheets were not laid out."
+        Err.Clear
+        Exit Function
+    End If
+    On Error GoTo 0
+
+    For i = 0 To UBound(sheetList)
+        Set ws = Nothing
+        On Error Resume Next
+        Set ws = ThisWorkbook.Worksheets(sheetList(i))
+        On Error GoTo 0
+        If ws Is Nothing Then
+            out = out & vbLf & "   " & sheetList(i) & ": sheet not found"
+        Else
+            n = LayoutTeamSheet(ws, data)
+            If n = -1 Then
+                out = out & vbLf & "   " & sheetList(i) & ": already laid out, left as is"
+            ElseIf n = -2 Then
+                out = out & vbLf & "   " & sheetList(i) & ": stopped on an error: " & layoutError
+            Else
+                out = out & vbLf & "   " & sheetList(i) & ": " & n & " patient(s)"
+            End If
+        End If
+    Next i
+    FinishSchedule = vbLf & vbLf & "Ran Run_All_Macros. Team sheets:" & out
+End Function
+
+' Lays out one Team sheet. Returns the number of patient rows, -1 if it was laid out
+' already (D:E of the header row merged), or -2 on an error (see layoutError).
+' Patient rows are the rows with a name in A between the "Patient" header row and the
+' next "Patient" row.
+Private Function LayoutTeamSheet(ws As Worksheet, data As Object) As Long
+    Dim hdr As Long, endRow As Long, r As Long, k As Long, h As Double, w As Double
+    Dim patRows As Collection, wasProtected As Boolean, rec As Object
+    Dim alerts As Boolean
+
+    For r = 1 To MAX_ROW
+        If IsPatientHeader(ws, r) Then hdr = r: Exit For
+    Next r
+    If hdr = 0 Then Exit Function
+    If ws.Cells(hdr, "D").MergeArea.Columns.Count > 1 Then LayoutTeamSheet = -1: Exit Function
+
+    ' Patients end at the repeated "Patient" header; without one, at the first empty name.
+    For r = hdr + 1 To MAX_ROW
+        If IsPatientHeader(ws, r) Then endRow = r: Exit For
+    Next r
+    Set patRows = New Collection
+    For r = hdr + 1 To IIf(endRow > 0, endRow - 1, MAX_ROW)
+        If Len(Trim$(ws.Cells(r, "A").Value & "")) > 0 Then
+            patRows.Add r
+        ElseIf endRow = 0 And patRows.Count > 0 Then
+            Exit For
+        End If
+    Next r
+
+    alerts = Application.DisplayAlerts
+    On Error GoTo Fail
+    wasProtected = ws.ProtectContents
+    If wasProtected Then ws.Unprotect
+    Application.DisplayAlerts = False   ' merging asks before dropping empty cells
+
+    ' Split D in two: new column E, each half the old width.
+    w = ws.Columns("D").ColumnWidth
+    ws.Columns("E").Insert Shift:=xlToRight, CopyOrigin:=xlFormatFromLeftOrAbove
+    ws.Columns("D").ColumnWidth = w / 2
+    ws.Columns("E").ColumnWidth = w / 2
+    MergeDE ws, hdr
+
+    ' Bottom-up so row numbers above stay put.
+    For k = patRows.Count To 1 Step -1
+        r = patRows(k)
+        Set rec = FindPatient(data, ws.Cells(r, "B").Value & "", ws.Cells(r, "A").Value & "")
+        h = ws.Rows(r).RowHeight
+        ws.Rows(r + 1).Insert Shift:=xlDown, CopyOrigin:=xlFormatFromLeftOrAbove
+        ws.Rows(r).RowHeight = h / 2
+        ws.Rows(r + 1).RowHeight = h / 2
+        MergeDE ws, r
+        MergeDown ws, r
+        WriteLabeled ws.Cells(r + 1, "D"), "Vitals", Field(rec, "vitals"), xlLeft
+        WriteLabeled ws.Cells(r + 1, "E"), "CRIT", Field(rec, "crits"), xlRight
+    Next k
+
+    ' The row just past the last patient (the repeated header) gets D:E merged too.
+    ' The last patient moved down one row for each patient above it, plus its own vitals row.
+    If patRows.Count > 0 Then MergeDE ws, patRows(patRows.Count) + patRows.Count + 1
+
+    Application.DisplayAlerts = alerts
+    If wasProtected Then ws.Protect
+    LayoutTeamSheet = patRows.Count
+    Exit Function
+
+Fail:
+    layoutError = Err.Description
+    Application.DisplayAlerts = alerts
+    If wasProtected Then ws.Protect
+    LayoutTeamSheet = -2
+End Function
+
+' Puts a Team sheet back the way Run_All_Macros expects it: removes each patient's
+' second (vitals) row, restores the row height, and removes column E. Deleting whole
+' rows and columns shrinks the merges with them. Does nothing if the sheet isn't laid out.
+Private Function UndoTeamLayout(ws As Worksheet) As Boolean
+    Dim hdr As Long, endRow As Long, r As Long, h As Double, w As Double
+    Dim wasProtected As Boolean, alerts As Boolean
+
+    For r = 1 To MAX_ROW
+        If IsPatientHeader(ws, r) Then hdr = r: Exit For
+    Next r
+    UndoTeamLayout = True
+    If hdr = 0 Then Exit Function
+    If ws.Cells(hdr, "D").MergeArea.Columns.Count < 2 Then Exit Function
+
+    alerts = Application.DisplayAlerts
+    On Error GoTo Fail
+    wasProtected = ws.ProtectContents
+    If wasProtected Then ws.Unprotect
+    Application.DisplayAlerts = False
+
+    ' Only the patient rows: up to the repeated "Patient" header, or the first empty name.
+    For r = hdr + 1 To hdr + 2 * MAX_ROW
+        If IsPatientHeader(ws, r) Then Exit For
+        If Len(Trim$(ws.Cells(r, "A").Value & "")) = 0 And Not ws.Cells(r, "A").MergeCells Then Exit For
+    Next r
+    endRow = r
+
+    ' A vitals row is the lower half of a two-row merge in column A.
+    For r = endRow - 1 To hdr + 2 Step -1
+        If ws.Cells(r, "A").MergeArea.Row = r - 1 And ws.Cells(r, "A").MergeArea.Rows.Count = 2 Then
+            h = ws.Rows(r - 1).RowHeight + ws.Rows(r).RowHeight
+            ws.Rows(r).Delete
+            ws.Rows(r - 1).RowHeight = h
+        End If
+    Next r
+
+    w = ws.Columns("D").ColumnWidth + ws.Columns("E").ColumnWidth
+    ws.Columns("E").Delete
+    ws.Columns("D").ColumnWidth = w
+
+    Application.DisplayAlerts = alerts
+    If wasProtected Then ws.Protect
+    Exit Function
+
+Fail:
+    layoutError = Err.Description
+    Application.DisplayAlerts = alerts
+    If wasProtected Then ws.Protect
+    UndoTeamLayout = False
+End Function
+
+Private Function IsPatientHeader(ws As Worksheet, ByVal r As Long) As Boolean
+    IsPatientHeader = StrComp(Trim$(ws.Cells(r, "A").Value & ""), "Patient", vbTextCompare) = 0
+End Function
+
+' D and E of one row become one cell, keeping D's text.
+Private Sub MergeDE(ws As Worksheet, ByVal r As Long)
+    With ws.Range(ws.Cells(r, "D"), ws.Cells(r, "E"))
+        If Not .MergeCells Then .Merge
+    End With
+End Sub
+
+' A, B, C and F through Q of row r merge with the new row below (D and E stay separate).
+Private Sub MergeDown(ws As Worksheet, ByVal r As Long)
+    Dim c As Long, m As Range, last As Long
+    c = 1
+    Do While c <= LAST_TEAM_COL
+        If c = 4 Or c = 5 Then
+            c = c + 1
+        Else
+            Set m = ws.Cells(r, c).MergeArea
+            last = m.Column + m.Columns.Count - 1
+            If last > LAST_TEAM_COL Then last = LAST_TEAM_COL
+            ws.Range(ws.Cells(r, m.Column), ws.Cells(r + 1, last)).Merge
+            c = last + 1
+        End If
+    Loop
+End Sub
+
+' "Vitals: BP:106/42, ..." with only the label in bold italics. Blank text leaves the cell empty.
+Private Sub WriteLabeled(c As Range, ByVal label As String, ByVal text As String, ByVal align As Long)
+    c.ClearContents
+    c.HorizontalAlignment = align
+    c.VerticalAlignment = xlCenter
+    c.WrapText = False
+    c.Font.Size = 9
+    c.Font.Bold = False
+    c.Font.Italic = False
+    If text = "" Then Exit Sub
+    c.Value = label & ": " & text
+    With c.Characters(1, Len(label)).Font
+        .Bold = True
+        .Italic = True
+    End With
+End Sub
+
+' The export row for a Team sheet row: by room, checked against the name; else by name.
+Private Function FindPatient(data As Object, ByVal room As String, ByVal nm As String) As Object
+    Dim key As Variant
+    key = RoomKey(room)
+    If data.Exists(key) Then
+        If NameKey(data(key)("A")) = NameKey(nm) Then Set FindPatient = data(key): Exit Function
+    End If
+    For Each key In data.Keys
+        If NameKey(data(key)("A")) = NameKey(nm) Then Set FindPatient = data(key): Exit Function
+    Next key
+End Function
+
+Private Function Field(rec As Object, ByVal nm As String) As String
+    If rec Is Nothing Then Exit Function
+    If rec.Exists(nm) Then Field = rec(nm)
+End Function
 
 '--- write one cell according to the export's conventions ---
 '   ""            leave the cell alone
